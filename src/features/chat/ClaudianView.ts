@@ -25,6 +25,7 @@ import {
 } from '../../utils/animationFrame';
 import type { FeatureHost } from '../FeatureHost';
 import { findCollaborationRebindCandidates } from './collaboration/collaborationRebinding';
+import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
 import { groupCollaborationTabBarItems } from './collaboration/collaborationTabs';
 import { CollaborationTimeline } from './collaboration/CollaborationTimeline';
 import type { HistoryConversationStatus } from './controllers/ConversationController';
@@ -77,6 +78,7 @@ export class ClaudianView extends ItemView {
   private tabStatePersistence: TabStatePersistenceCoordinator;
   private collaborationCoordinator: CollaborationCoordinator;
   private collaborationTimelines = new Map<TabId, CollaborationTimeline>();
+  private activeCollaborationDeliveries = new Map<string, string>();
 
   constructor(leaf: WorkspaceLeaf, plugin: FeatureHost) {
     super(leaf);
@@ -602,6 +604,11 @@ export class ClaudianView extends ItemView {
           throw new Error(`${participant.providerId} participant is not open`);
         }
 
+        const existingAssistantIds = new Set(
+          tab.state.messages
+            .filter(message => message.role === 'assistant')
+            .map(message => message.id),
+        );
         const cancel = () => inputController.cancelStreaming();
         signal.addEventListener('abort', cancel, { once: true });
         try {
@@ -626,9 +633,10 @@ export class ClaudianView extends ItemView {
           participant.conversationId = tab.conversationId;
         }
 
-        const assistantMessage = [...tab.state.messages]
-          .reverse()
-          .find(message => message.role === 'assistant' && message.content.trim());
+        const assistantMessage = findFreshAssistantMessage(
+          tab.state.messages,
+          existingAssistantIds,
+        );
         if (assistantMessage) {
           await this.plugin.storage.rooms.appendEvent(room.id, {
             id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -642,14 +650,30 @@ export class ClaudianView extends ItemView {
           });
           this.refreshCollaborationTimelines(room.id);
         }
-        if (assistantMessage?.isInterrupt) {
+        if (signal.aborted || assistantMessage?.isInterrupt) {
           throw new DOMException('Aborted', 'AbortError');
+        }
+        if (!assistantMessage) {
+          throw new Error(`${participant.providerId} completed without a new assistant response`);
         }
         return { providerMessageId: assistantMessage?.assistantMessageId };
       },
     });
-    void turn.completion.catch(() => {
-      new Notice('One or more collaboration participants failed.');
+    for (const providerId of collaborationTurn.recipientIds) {
+      this.activeCollaborationDeliveries.set(
+        this.getCollaborationDeliveryKey(room.id, providerId),
+        turn.event.id,
+      );
+    }
+    this.refreshCollaborationTimelines(room.id);
+    void turn.completion.finally(() => {
+      for (const providerId of collaborationTurn.recipientIds) {
+        const key = this.getCollaborationDeliveryKey(room.id, providerId);
+        if (this.activeCollaborationDeliveries.get(key) === turn.event.id) {
+          this.activeCollaborationDeliveries.delete(key);
+        }
+      }
+      this.refreshCollaborationTimelines(room.id);
     });
     return true;
   }
@@ -725,6 +749,10 @@ export class ClaudianView extends ItemView {
           participantTabs: roomTabs,
           plugin: this.plugin,
           roomId,
+          canStop: providerId => this.activeCollaborationDeliveries.has(
+            this.getCollaborationDeliveryKey(roomId, providerId),
+          ),
+          onStop: providerId => this.stopCollaborationDelivery(roomId, providerId),
           onRetry: async (providerId, content) => {
             await this.routeCollaborationMessage(tab.id, `@${providerId} ${content}`);
           },
@@ -783,6 +811,17 @@ export class ClaudianView extends ItemView {
       })
     )));
     return room;
+  }
+
+  private stopCollaborationDelivery(roomId: string, providerId: ProviderId): void {
+    const key = this.getCollaborationDeliveryKey(roomId, providerId);
+    const eventId = this.activeCollaborationDeliveries.get(key);
+    if (!eventId) return;
+    this.collaborationCoordinator.cancel(roomId, eventId, providerId);
+  }
+
+  private getCollaborationDeliveryKey(roomId: string, providerId: ProviderId): string {
+    return `${roomId}:${providerId}`;
   }
 
   private refreshCollaborationTimelines(roomId: string): void {

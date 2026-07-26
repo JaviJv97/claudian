@@ -11,6 +11,8 @@ interface CollaborationTimelineOptions {
   participantTabs: TabData[];
   plugin: FeatureHost;
   roomId: string;
+  canStop: (providerId: ProviderId) => boolean;
+  onStop: (providerId: ProviderId) => void;
   onRetry: (providerId: ProviderId, content: string) => Promise<void>;
   onReview: (
     reviewerId: ProviderId,
@@ -133,7 +135,7 @@ export class CollaborationTimeline {
         },
       });
       setIcon(stopButton, 'square');
-      stopButton.addEventListener('click', () => tab.controllers.inputController?.cancelStreaming());
+      stopButton.addEventListener('click', () => this.options.onStop(tab.providerId));
       this.stopEls.set(tab.providerId, stopButton);
     }
   }
@@ -318,8 +320,10 @@ export class CollaborationTimeline {
         `${getProviderLabel(tab.providerId)}, ${status}`,
       );
       const stopButton = this.stopEls.get(tab.providerId);
-      stopButton?.toggleClass('claudian-hidden', !tab.state.isStreaming);
-      stopButton?.setAttribute('aria-hidden', tab.state.isStreaming ? 'false' : 'true');
+      const canStop = this.options.canStop(tab.providerId);
+      stopButton?.toggleClass('claudian-hidden', !canStop);
+      stopButton?.setAttribute('aria-hidden', canStop ? 'false' : 'true');
+      if (stopButton) stopButton.disabled = !canStop;
     }
   }
 }

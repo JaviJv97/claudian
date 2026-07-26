@@ -166,10 +166,11 @@ describe('CollaborationCoordinator', () => {
       recipientIds: ['claude', 'codex'],
       dispatch,
     });
-    coordinator.cancel('room-1', 'event-1', 'claude');
+    expect(coordinator.cancel('room-1', 'event-1', 'claude')).toBe(true);
     await turn.completion;
 
     expect(room.events[0].delivery.claude.status).toBe('cancelled');
     expect(room.events[0].delivery.codex.status).toBe('completed');
+    expect(coordinator.cancel('room-1', 'event-1', 'claude')).toBe(false);
   });
 });

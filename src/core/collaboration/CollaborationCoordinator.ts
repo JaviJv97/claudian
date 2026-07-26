@@ -119,8 +119,13 @@ export class CollaborationCoordinator {
     return { event, completion };
   }
 
-  cancel(roomId: string, eventId: string, providerId: ProviderId): void {
-    this.abortControllers.get(this.getDeliveryKey(roomId, eventId, providerId))?.abort();
+  cancel(roomId: string, eventId: string, providerId: ProviderId): boolean {
+    const abortController = this.abortControllers.get(
+      this.getDeliveryKey(roomId, eventId, providerId),
+    );
+    if (!abortController) return false;
+    abortController.abort();
+    return true;
   }
 
   private async dispatch(
