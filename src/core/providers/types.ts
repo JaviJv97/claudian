@@ -44,6 +44,7 @@ export const DEFAULT_CHAT_PROVIDER_ID = 'claude' as const satisfies ProviderId;
 export interface CreateChatRuntimeOptions {
   plugin: ProviderHost;
   providerId?: ProviderId;
+  runtimeProfileId?: string;
 }
 
 /**
@@ -61,9 +62,10 @@ export interface ProviderRegistration {
   setEnabled?: (settings: Record<string, unknown>, enabled: boolean) => void;
   capabilities: ProviderCapabilities;
   environmentKeyPatterns?: RegExp[];
+  resolveRuntimeProfileEnvironment?: (profileId?: string) => Record<string, string>;
   chatUIConfig: ProviderChatUIConfig;
   settingsReconciler: ProviderSettingsReconciler;
-  createRuntime: (options: Omit<CreateChatRuntimeOptions, 'providerId'>) => ChatRuntime;
+  createRuntime: (options: CreateChatRuntimeOptions) => ChatRuntime;
   createTitleGenerationService: (plugin: ProviderHost) => TitleGenerationService;
   createInstructionRefineService: (plugin: ProviderHost) => InstructionRefineService;
   createInlineEditService: (plugin: ProviderHost) => InlineEditService;

@@ -71,6 +71,7 @@ import {
   isSessionMissingError,
 } from '../../../utils/session';
 import { CLAUDE_PROVIDER_CAPABILITIES } from '../capabilities';
+import { resolveClaudeRuntimeProfileEnvironment } from '../config/ClaudeRuntimeProfile';
 import { loadSubagentFinalResult, loadSubagentToolCalls } from '../history/ClaudeHistoryStore';
 import { loadClaudeAgentQuery } from '../loadClaudeAgentSdk';
 import { toClaudeRuntimeModelId } from '../modelSelection';
@@ -125,6 +126,7 @@ export interface ClaudeRuntimeServices {
   mcpManager: McpServerManager;
   pluginManager: AppPluginManager;
   agentManager: Pick<AppAgentManager, 'setBuiltinAgentNames'>;
+  runtimeProfileId?: string;
 }
 
 type QueryOptions = ChatRuntimeQueryOptions;
@@ -155,6 +157,7 @@ export class ClaudianService implements ChatRuntime {
   private currentConversationModel: string | null = null;
   private currentConversationId: string | null = null;
   private readyStateListeners = new Set<(ready: boolean) => void>();
+  readonly runtimeProfileId?: string;
 
   // Modular components
   private sessionManager = new SessionManager();
@@ -239,6 +242,7 @@ export class ClaudianService implements ChatRuntime {
       this.mcpManager = services.mcpManager;
       this.pluginManager = services.pluginManager ?? legacyPlugin.pluginManager ?? null;
       this.agentManager = services.agentManager ?? legacyPlugin.agentManager ?? null;
+      this.runtimeProfileId = services.runtimeProfileId;
       return;
     }
 
@@ -802,7 +806,10 @@ export class ClaudianService implements ChatRuntime {
   }
 
   private buildQueryOptionsContext(vaultPath: string, cliPath: string): QueryOptionsContext {
-    const customEnv = parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId));
+    const customEnv = {
+      ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
+      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId),
+    };
     const enhancedPath = getEnhancedPath(customEnv.PATH, cliPath);
 
     return {
@@ -817,9 +824,10 @@ export class ClaudianService implements ChatRuntime {
   }
 
   private buildHistoryPathContext(vaultPath: string): ProviderHistoryPathContext {
-    const customEnv = parseEnvironmentVariables(
-      this.plugin.getActiveEnvironmentVariables(this.providerId),
-    );
+    const customEnv = {
+      ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
+      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId),
+    };
     return {
       environment: { ...process.env, ...customEnv },
       hostPlatform: process.platform,

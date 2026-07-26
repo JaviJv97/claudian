@@ -92,6 +92,48 @@ describe('CollaborationCoordinator', () => {
     }));
   });
 
+  it('keeps deliveries separate for two participants from the same provider', async () => {
+    const room = createRoom();
+    room.participants = [
+      {
+        id: 'claude-personal',
+        providerId: 'claude',
+        conversationId: 'personal-conversation',
+      },
+      {
+        id: 'claude-company',
+        providerId: 'claude',
+        conversationId: 'company-conversation',
+      },
+    ];
+    const storage = createStorage(room);
+    const coordinator = new CollaborationCoordinator({
+      storage,
+      generateId: () => 'event-1',
+      now: () => 10,
+    });
+
+    const turn = await coordinator.send(room, {
+      content: 'Compare',
+      recipientIds: ['claude-personal', 'claude-company'],
+      dispatch: async participant => ({
+        providerMessageId: `${participant.id}-message`,
+      }),
+    });
+    await turn.completion;
+
+    expect(room.events[0].delivery).toEqual({
+      'claude-personal': expect.objectContaining({
+        status: 'completed',
+        providerMessageId: 'claude-personal-message',
+      }),
+      'claude-company': expect.objectContaining({
+        status: 'completed',
+        providerMessageId: 'claude-company-message',
+      }),
+    });
+  });
+
   it('copies image attachments into the durable user event', async () => {
     const room = createRoom();
     const storage = createStorage(room);

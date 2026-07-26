@@ -11,8 +11,8 @@ function escapeRegExp(value: string): string {
 
 export function createCollaborationMemberships(
   roomId: string,
-  conversationIds: Record<ProviderId, string>,
-): Record<ProviderId, CollaborationMembership> {
+  conversationIds: Record<string, string>,
+): Record<string, CollaborationMembership> {
   return Object.fromEntries(
     Object.keys(conversationIds).map(participantId => [
       participantId,
@@ -27,8 +27,8 @@ export function createCollaborationMemberships(
 
 export function resolveCollaborationRecipients(
   message: string,
-  participantIds: readonly ProviderId[],
-): ProviderId[] {
+  participantIds: readonly string[],
+): string[] {
   if (/(^|\s)@all\b/i.test(message)) {
     return [...participantIds];
   }
@@ -43,19 +43,19 @@ export function resolveCollaborationRecipients(
 
 export function resolveCollaborationTurn(
   message: string,
-  participantIds: readonly ProviderId[],
+  participantIds: readonly string[],
 ): {
   content: string;
-  recipientIds: ProviderId[];
-  recipientContent: Partial<Record<ProviderId, string>>;
+  recipientIds: string[];
+  recipientContent: Partial<Record<string, string>>;
 } {
   const routeNames = ['all', ...participantIds].map(escapeRegExp).join('|');
   const addressedLine = new RegExp(`^\\s*@(${routeNames})\\b\\s*:?\\s*(.*)$`, 'i');
   const sharedLines: string[] = [];
-  const participantLines = new Map<ProviderId, string[]>(
+  const participantLines = new Map<string, string[]>(
     participantIds.map(providerId => [providerId, []]),
   );
-  let activeRecipients: ProviderId[] | null = null;
+  let activeRecipients: string[] | null = null;
   let hasAddressedBlock = false;
 
   for (const line of message.split('\n')) {
@@ -114,4 +114,10 @@ export function resolveCollaborationTurn(
       recipientIds.map(providerId => [providerId, content]),
     ),
   };
+}
+
+export function getCollaborationParticipantId(
+  participant: { id?: string; providerId: ProviderId },
+): string {
+  return participant.id ?? participant.providerId;
 }

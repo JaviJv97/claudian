@@ -5,6 +5,7 @@ import { CollaborationCoordinator } from '../../core/collaboration/Collaboration
 import {
   createCollaborationMemberships,
   createCollaborationRoomId,
+  getCollaborationParticipantId,
   resolveCollaborationTurn,
 } from '../../core/collaboration/collaborationRoom';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
@@ -511,31 +512,61 @@ export class ClaudianView extends ItemView {
     }
 
     const maxTabs = Math.max(3, Math.min(10, this.plugin.settings.maxTabs ?? 3));
-    if (this.tabManager.getTabCount() + 2 > maxTabs) {
-      new Notice('A collaboration room needs two available tabs.');
+    if (this.tabManager.getTabCount() + 3 > maxTabs) {
+      new Notice('A collaboration room needs three available tabs.');
       return false;
     }
 
     const roomId = createCollaborationRoomId();
-    const claudeConversation = await this.plugin.createConversation({ providerId: 'claude' });
+    const claudePersonalConversation = await this.plugin.createConversation({
+      providerId: 'claude',
+      runtimeProfileId: 'personal',
+    });
+    const claudeCompanyConversation = await this.plugin.createConversation({
+      providerId: 'claude',
+      runtimeProfileId: 'company',
+    });
     const codexConversation = await this.plugin.createConversation({ providerId: 'codex' });
     const memberships = createCollaborationMemberships(roomId, {
-      claude: claudeConversation.id,
+      'claude-personal': claudePersonalConversation.id,
+      'claude-company': claudeCompanyConversation.id,
       codex: codexConversation.id,
     });
     await this.plugin.storage.rooms.create({
       id: roomId,
-      title: 'Claude + Codex',
+      title: 'Claude Personal + Claude Company + Codex',
       participants: [
-        { providerId: 'claude', conversationId: claudeConversation.id },
-        { providerId: 'codex', conversationId: codexConversation.id },
+        {
+          id: 'claude-personal',
+          providerId: 'claude',
+          label: 'Claude Personal',
+          runtimeProfileId: 'personal',
+          conversationId: claudePersonalConversation.id,
+        },
+        {
+          id: 'claude-company',
+          providerId: 'claude',
+          label: 'Claude Company',
+          runtimeProfileId: 'company',
+          conversationId: claudeCompanyConversation.id,
+        },
+        {
+          id: 'codex',
+          providerId: 'codex',
+          label: 'Codex',
+          conversationId: codexConversation.id,
+        },
       ],
     });
 
     await Promise.all([
-      this.plugin.updateConversation(claudeConversation.id, {
-        title: 'Collaboration · Claude',
-        collaboration: memberships.claude,
+      this.plugin.updateConversation(claudePersonalConversation.id, {
+        title: 'Collaboration · Claude Personal',
+        collaboration: memberships['claude-personal'],
+      }),
+      this.plugin.updateConversation(claudeCompanyConversation.id, {
+        title: 'Collaboration · Claude Company',
+        collaboration: memberships['claude-company'],
       }),
       this.plugin.updateConversation(codexConversation.id, {
         title: 'Collaboration · Codex',
@@ -543,8 +574,13 @@ export class ClaudianView extends ItemView {
       }),
     ]);
 
-    const claudeTab = await this.tabManager.createTab(
-      claudeConversation.id,
+    const claudePersonalTab = await this.tabManager.createTab(
+      claudePersonalConversation.id,
+      undefined,
+      { activate: false },
+    );
+    const claudeCompanyTab = await this.tabManager.createTab(
+      claudeCompanyConversation.id,
       undefined,
       { activate: false },
     );
@@ -554,20 +590,22 @@ export class ClaudianView extends ItemView {
       { activate: true },
     );
 
-    if (!claudeTab || !codexTab) {
-      if (claudeTab) await this.tabManager.closeTab(claudeTab.id, true);
+    if (!claudePersonalTab || !claudeCompanyTab || !codexTab) {
+      if (claudePersonalTab) await this.tabManager.closeTab(claudePersonalTab.id, true);
+      if (claudeCompanyTab) await this.tabManager.closeTab(claudeCompanyTab.id, true);
       if (codexTab) await this.tabManager.closeTab(codexTab.id, true);
       await Promise.all([
-        this.plugin.deleteConversation(claudeConversation.id),
+        this.plugin.deleteConversation(claudePersonalConversation.id),
+        this.plugin.deleteConversation(claudeCompanyConversation.id),
         this.plugin.deleteConversation(codexConversation.id),
       ]);
-      new Notice('Could not open both collaboration participants.');
+      new Notice('Could not open all collaboration participants.');
       return false;
     }
 
     this.updateTabBarVisibility();
     await this.reconcileCollaborationTimelines();
-    new Notice('Claude + Codex collaboration room created.');
+    new Notice('Claude personal + Claude company + Codex room created.');
     return true;
   }
 
@@ -591,7 +629,7 @@ export class ClaudianView extends ItemView {
 
     const collaborationTurn = resolveCollaborationTurn(
       content,
-      room.participants.map(participant => participant.providerId),
+      room.participants.map(getCollaborationParticipantId),
     );
     const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
     const sharedReferencedFiles = findSharedReferencedFiles(
@@ -618,6 +656,7 @@ export class ClaudianView extends ItemView {
       recipientContent: collaborationTurn.recipientContent,
       attachments: images,
       dispatch: async (participant, request, signal) => {
+        const participantId = getCollaborationParticipantId(participant);
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
@@ -626,7 +665,7 @@ export class ClaudianView extends ItemView {
         ));
         const inputController = tab?.controllers.inputController;
         if (!tab || !inputController) {
-          throw new Error(`${participant.providerId} participant is not open`);
+          throw new Error(`${participantId} participant is not open`);
         }
 
         const existingAssistantIds = new Set(
@@ -651,7 +690,7 @@ export class ClaudianView extends ItemView {
         if (tab.conversationId && tab.conversationId !== participant.conversationId) {
           const reboundRoom = await this.rebindCollaborationParticipant(
             room.id,
-            participant.providerId,
+            participantId,
             tab.conversationId,
           );
           room.participants = reboundRoom.participants;
@@ -666,7 +705,7 @@ export class ClaudianView extends ItemView {
           await this.plugin.storage.rooms.appendEvent(room.id, {
             id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
             kind: 'message',
-            authorId: participant.providerId,
+            authorId: participantId,
             recipientIds: ['user'],
             content: assistantMessage.content,
             createdAt: assistantMessage.timestamp,
@@ -679,7 +718,7 @@ export class ClaudianView extends ItemView {
           throw new DOMException('Aborted', 'AbortError');
         }
         if (!assistantMessage) {
-          throw new Error(`${participant.providerId} completed without a new assistant response`);
+          throw new Error(`${participantId} completed without a new assistant response`);
         }
         const conflictFiles = findChangedSharedFiles(
           fileBaseline,
@@ -692,16 +731,16 @@ export class ClaudianView extends ItemView {
         };
       },
     });
-    for (const providerId of collaborationTurn.recipientIds) {
+    for (const participantId of collaborationTurn.recipientIds) {
       this.activeCollaborationDeliveries.set(
-        this.getCollaborationDeliveryKey(room.id, providerId),
+        this.getCollaborationDeliveryKey(room.id, participantId),
         turn.event.id,
       );
     }
     this.refreshCollaborationTimelines(room.id);
     void turn.completion.finally(() => {
-      for (const providerId of collaborationTurn.recipientIds) {
-        const key = this.getCollaborationDeliveryKey(room.id, providerId);
+      for (const participantId of collaborationTurn.recipientIds) {
+        const key = this.getCollaborationDeliveryKey(room.id, participantId);
         if (this.activeCollaborationDeliveries.get(key) === turn.event.id) {
           this.activeCollaborationDeliveries.delete(key);
         }
@@ -750,15 +789,32 @@ export class ClaudianView extends ItemView {
         if (!membership) continue;
         room = await this.plugin.storage.rooms.create({
           id: roomId,
-          title: 'Claude + Codex',
+          title: 'Claude Personal + Claude Company + Codex',
           participants: Object.entries(membership.conversationIds).map(
-            ([providerId, conversationId]) => ({ providerId, conversationId }),
+            ([participantId, conversationId]) => ({
+              id: participantId,
+              providerId: participantId.startsWith('claude-') ? 'claude' : participantId,
+              label: participantId === 'claude-personal'
+                ? 'Claude Personal'
+                : participantId === 'claude-company'
+                  ? 'Claude Company'
+                  : ProviderRegistry.getProviderDisplayName(participantId),
+              runtimeProfileId: participantId === 'claude-personal'
+                ? 'personal'
+                : participantId === 'claude-company'
+                  ? 'company'
+                  : undefined,
+              conversationId,
+            }),
           ),
         });
       }
       const tabIdentities = tabs.map(tab => ({
         tabId: tab.id,
         providerId: tab.providerId,
+        runtimeProfileId: tab.conversationId
+          ? this.plugin.getConversationSync(tab.conversationId)?.runtimeProfileId
+          : undefined,
         conversationId: tab.conversationId,
         roomId: tab.conversationId
           ? this.plugin.getConversationSync(tab.conversationId)?.collaboration?.roomId ?? null
@@ -767,7 +823,7 @@ export class ClaudianView extends ItemView {
       for (const candidate of findCollaborationRebindCandidates(room, tabIdentities)) {
         room = await this.rebindCollaborationParticipant(
           room.id,
-          candidate.providerId,
+          candidate.participantId,
           candidate.conversationId,
         );
         const replacementTab = tabs.find(tab => tab.id === candidate.tabId);
@@ -780,6 +836,10 @@ export class ClaudianView extends ItemView {
           component: this,
           hostTab: tab,
           participantTabs: roomTabs,
+          participantLabels: Object.fromEntries(room.participants.map(participant => [
+            getCollaborationParticipantId(participant),
+            participant.label ?? ProviderRegistry.getProviderDisplayName(participant.providerId),
+          ])),
           plugin: this.plugin,
           roomId,
           canStop: providerId => this.activeCollaborationDeliveries.has(
@@ -811,7 +871,13 @@ export class ClaudianView extends ItemView {
             );
           },
           onReview: async (reviewerId, sourceProviderId, content) => {
-            const sourceLabel = ProviderRegistry.getProviderDisplayName(sourceProviderId);
+            const sourceParticipant = room.participants.find(participant => (
+              getCollaborationParticipantId(participant) === sourceProviderId
+            ));
+            const sourceLabel = sourceParticipant?.label
+              ?? (sourceParticipant
+                ? ProviderRegistry.getProviderDisplayName(sourceParticipant.providerId)
+                : sourceProviderId);
             await this.routeCollaborationMessage(
               tab.id,
               `@${reviewerId} Review this response from ${sourceLabel}. Identify errors, omissions, and concrete improvements.\n\n${content}`,
@@ -827,7 +893,7 @@ export class ClaudianView extends ItemView {
     roomId: string,
     eventId: string,
     resolution: 'kept-current' | 'applied-proposal',
-    resolutionProviderId?: ProviderId,
+    resolutionProviderId?: string,
   ): Promise<void> {
     const currentRoom = await this.plugin.storage.rooms.get(roomId);
     const event = currentRoom?.events.find(candidate => candidate.id === eventId);
@@ -866,38 +932,38 @@ export class ClaudianView extends ItemView {
 
   private async rebindCollaborationParticipant(
     roomId: string,
-    providerId: ProviderId,
+    participantId: string,
     conversationId: string,
   ) {
     const room = await this.plugin.storage.rooms.updateParticipantConversation(
       roomId,
-      providerId,
+      participantId,
       conversationId,
     );
     const conversationIds = Object.fromEntries(
       room.participants.map(participant => [
-        participant.providerId,
+        getCollaborationParticipantId(participant),
         participant.conversationId,
       ]),
     );
     const memberships = createCollaborationMemberships(room.id, conversationIds);
     await Promise.all(room.participants.map(participant => (
       this.plugin.updateConversation(participant.conversationId, {
-        collaboration: memberships[participant.providerId],
+        collaboration: memberships[getCollaborationParticipantId(participant)],
       })
     )));
     return room;
   }
 
-  private stopCollaborationDelivery(roomId: string, providerId: ProviderId): void {
-    const key = this.getCollaborationDeliveryKey(roomId, providerId);
+  private stopCollaborationDelivery(roomId: string, participantId: string): void {
+    const key = this.getCollaborationDeliveryKey(roomId, participantId);
     const eventId = this.activeCollaborationDeliveries.get(key);
     if (!eventId) return;
-    this.collaborationCoordinator.cancel(roomId, eventId, providerId);
+    this.collaborationCoordinator.cancel(roomId, eventId, participantId);
   }
 
-  private getCollaborationDeliveryKey(roomId: string, providerId: ProviderId): string {
-    return `${roomId}:${providerId}`;
+  private getCollaborationDeliveryKey(roomId: string, participantId: string): string {
+    return `${roomId}:${participantId}`;
   }
 
   private refreshCollaborationTimelines(roomId: string): void {

@@ -13,12 +13,16 @@ export type CollaborationDeliveryStatus =
 
 export interface CollaborationMembership {
   roomId: string;
-  participantId: ProviderId;
-  conversationIds: Record<ProviderId, string>;
+  participantId: string;
+  conversationIds: Record<string, string>;
 }
 
 export interface CollaborationParticipant {
+  /** Stable room-local identity. Missing only on legacy two-participant rooms. */
+  id?: string;
   providerId: ProviderId;
+  label?: string;
+  runtimeProfileId?: string;
   conversationId: string;
 }
 
@@ -30,7 +34,7 @@ export interface CollaborationDelivery {
   providerMessageId?: string;
   conflictFiles?: string[];
   resolution?: 'kept-current' | 'applied-proposal';
-  resolutionProviderId?: ProviderId;
+  resolutionProviderId?: string;
 }
 
 export interface CollaborationAttachment {
@@ -50,9 +54,9 @@ export interface CollaborationEvent {
   recipientIds: CollaborationRecipientId[];
   content: string;
   /** Provider-specific prompt text for addressed multi-participant turns. */
-  recipientContent?: Partial<Record<ProviderId, string>>;
+  recipientContent?: Partial<Record<string, string>>;
   createdAt: number;
-  delivery: Record<ProviderId, CollaborationDelivery>;
+  delivery: Record<string, CollaborationDelivery>;
   attachments?: CollaborationAttachment[];
   sourceMessageId?: string;
 }

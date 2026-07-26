@@ -20,6 +20,7 @@ import type {
 
 export interface ChatRuntime {
   readonly providerId: ProviderId;
+  readonly runtimeProfileId?: string;
 
   getCapabilities(): Readonly<ProviderCapabilities>;
   /** Loads provider-owned state required for synchronous turn encoding. Must be idempotent. */

@@ -1,10 +1,10 @@
+import { getCollaborationParticipantId } from '../../core/collaboration/collaborationRoom';
 import type { VaultFileAdapter } from '../../core/storage/VaultFileAdapter';
 import type {
   CollaborationDelivery,
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
-  ProviderId,
 } from '../../core/types';
 
 const ROOMS_PATH = '.claudian/rooms';
@@ -72,16 +72,16 @@ export class CollaborationRoomRepository {
 
   async updateParticipantConversation(
     roomId: string,
-    providerId: ProviderId,
+    participantId: string,
     conversationId: string,
     now = Date.now(),
   ): Promise<CollaborationRoom> {
     return this.mutate(roomId, (room) => {
       const participant = room.participants.find(candidate => (
-        candidate.providerId === providerId
+        getCollaborationParticipantId(candidate) === participantId
       ));
       if (!participant) {
-        throw new Error(`Collaboration participant not found: ${providerId}`);
+        throw new Error(`Collaboration participant not found: ${participantId}`);
       }
       participant.conversationId = conversationId;
       room.updatedAt = Math.max(room.updatedAt, now);
@@ -92,13 +92,13 @@ export class CollaborationRoomRepository {
   async updateDelivery(
     roomId: string,
     eventId: string,
-    providerId: ProviderId,
+    participantId: string,
     delivery: CollaborationDelivery,
   ): Promise<CollaborationRoom> {
     return this.mutate(roomId, (room) => {
       const event = room.events.find(candidate => candidate.id === eventId);
       if (!event) throw new Error(`Collaboration event not found: ${eventId}`);
-      event.delivery[providerId] = { ...delivery };
+      event.delivery[participantId] = { ...delivery };
       room.updatedAt = Math.max(
         room.updatedAt,
         delivery.completedAt ?? delivery.startedAt ?? Date.now(),

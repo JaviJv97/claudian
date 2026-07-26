@@ -5,7 +5,6 @@ import type {
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
-  ProviderId,
 } from '../types';
 
 export interface CollaborationRoomStorage {
@@ -18,7 +17,7 @@ export interface CollaborationRoomStorage {
   get(id: string): Promise<CollaborationRoom | null>;
   updateParticipantConversation(
     roomId: string,
-    providerId: ProviderId,
+    participantId: string,
     conversationId: string,
     now?: number,
   ): Promise<CollaborationRoom>;
@@ -26,7 +25,7 @@ export interface CollaborationRoomStorage {
   updateDelivery(
     roomId: string,
     eventId: string,
-    providerId: ProviderId,
+    participantId: string,
     delivery: CollaborationDelivery,
   ): Promise<CollaborationRoom>;
 }

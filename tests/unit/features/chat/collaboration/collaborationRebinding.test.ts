@@ -31,12 +31,53 @@ describe('findCollaborationRebindCandidates', () => {
       },
     ])).toEqual([
       {
+        participantId: 'codex',
         providerId: 'codex',
         previousConversationId: 'codex-old',
         conversationId: 'codex-new',
         tabId: 'codex-tab',
       },
     ]);
+  });
+
+  it('distinguishes two Claude participants by runtime profile', () => {
+    const profiledRoom: CollaborationRoom = {
+      ...room,
+      participants: [
+        {
+          id: 'claude-personal',
+          providerId: 'claude',
+          runtimeProfileId: 'personal',
+          conversationId: 'personal-old',
+        },
+        {
+          id: 'claude-company',
+          providerId: 'claude',
+          runtimeProfileId: 'company',
+          conversationId: 'company-old',
+        },
+      ],
+    };
+
+    expect(findCollaborationRebindCandidates(profiledRoom, [
+      {
+        tabId: 'personal-tab',
+        providerId: 'claude',
+        runtimeProfileId: 'personal',
+        conversationId: 'personal-old',
+        roomId: 'room-1',
+      },
+      {
+        tabId: 'company-tab',
+        providerId: 'claude',
+        runtimeProfileId: 'company',
+        conversationId: 'company-new',
+        roomId: null,
+      },
+    ])).toEqual([expect.objectContaining({
+      participantId: 'claude-company',
+      conversationId: 'company-new',
+    })]);
   });
 
   it('does not guess when multiple unlinked tabs could be the replacement', () => {

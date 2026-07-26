@@ -1,15 +1,18 @@
+import { getCollaborationParticipantId } from '../../../core/collaboration/collaborationRoom';
 import type { CollaborationRoom, ProviderId } from '../../../core/types';
 import type { TabId } from '../tabs/types';
 
 export interface CollaborationTabIdentity {
   tabId: TabId;
   providerId: ProviderId;
+  runtimeProfileId?: string;
   conversationId: string | null;
   roomId: string | null;
 }
 
 export interface CollaborationRebindCandidate {
   tabId: TabId;
+  participantId: string;
   providerId: ProviderId;
   previousConversationId: string;
   conversationId: string;
@@ -29,6 +32,10 @@ export function findCollaborationRebindCandidates(
 
     const replacements = tabs.filter(tab => (
       tab.providerId === participant.providerId
+      && (
+        !participant.runtimeProfileId
+        || tab.runtimeProfileId === participant.runtimeProfileId
+      )
       && tab.conversationId
       && tab.roomId === null
     ));
@@ -36,6 +43,7 @@ export function findCollaborationRebindCandidates(
 
     candidates.push({
       tabId: replacements[0].tabId,
+      participantId: getCollaborationParticipantId(participant),
       providerId: participant.providerId,
       previousConversationId: participant.conversationId,
       conversationId: replacements[0].conversationId!,

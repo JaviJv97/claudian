@@ -34,8 +34,8 @@ describe('groupCollaborationTabBarItems', () => {
       expect.objectContaining({
         id: 'claude-tab',
         index: 1,
-        title: 'Claude + Codex',
-        badgeLabel: 'Claude + Codex',
+        title: 'Claude ×2 + Codex',
+        badgeLabel: 'Claude ×2 + Codex',
         isActive: true,
         isStreaming: true,
         canClose: false,

@@ -1,5 +1,6 @@
 import {
   createCollaborationMemberships,
+  getCollaborationParticipantId,
   resolveCollaborationRecipients,
   resolveCollaborationTurn,
 } from '@/core/collaboration/collaborationRoom';
@@ -112,5 +113,26 @@ describe('collaboration rooms', () => {
         claude: 'create Claude-Test.md',
       },
     });
+  });
+
+  it('routes two independently identified Claude participants', () => {
+    expect(resolveCollaborationTurn(
+      '@claude-personal: review tone\n@claude-company: review policy\n@codex: implement',
+      ['claude-personal', 'claude-company', 'codex'],
+    )).toEqual({
+      content: '@claude-personal: review tone\n@claude-company: review policy\n@codex: implement',
+      recipientIds: ['claude-personal', 'claude-company', 'codex'],
+      recipientContent: {
+        'claude-personal': 'review tone',
+        'claude-company': 'review policy',
+        codex: 'implement',
+      },
+    });
+  });
+
+  it('falls back to provider identity for legacy participants', () => {
+    expect(getCollaborationParticipantId({
+      providerId: 'claude',
+    })).toBe('claude');
   });
 });

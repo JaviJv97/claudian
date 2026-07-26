@@ -5,8 +5,8 @@ import type {
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
-  ProviderId,
 } from '../types';
+import { getCollaborationParticipantId } from './collaborationRoom';
 
 export interface CollaborationDispatchRequest {
   eventId: string;
@@ -27,8 +27,8 @@ export type CollaborationDispatch = (
 
 export interface SendCollaborationTurnOptions {
   content: string;
-  recipientIds: ProviderId[];
-  recipientContent?: Partial<Record<ProviderId, string>>;
+  recipientIds: string[];
+  recipientContent?: Partial<Record<string, string>>;
   attachments?: CollaborationAttachment[];
   dispatch: CollaborationDispatch;
 }
@@ -44,7 +44,7 @@ export interface CollaborationCoordinatorOptions {
   now?: () => number;
   onDeliveryChanged?: (
     event: CollaborationEvent,
-    providerId: ProviderId,
+    participantId: string,
     delivery: CollaborationDelivery,
   ) => void;
 }
@@ -82,40 +82,45 @@ export class CollaborationCoordinator {
     options: SendCollaborationTurnOptions,
   ): Promise<CollaborationTurn> {
     const recipients = room.participants.filter(participant => (
-      options.recipientIds.includes(participant.providerId)
+      options.recipientIds.includes(getCollaborationParticipantId(participant))
     ));
     const event: CollaborationEvent = {
       id: this.generateId(),
       kind: 'message',
       authorId: 'user',
-      recipientIds: recipients.map(participant => participant.providerId),
+      recipientIds: recipients.map(getCollaborationParticipantId),
       content: options.content,
       recipientContent: options.recipientContent
         ? { ...options.recipientContent }
         : undefined,
       createdAt: this.now(),
       delivery: Object.fromEntries(
-        recipients.map(participant => [participant.providerId, { status: 'pending' }]),
+        recipients.map(participant => [
+          getCollaborationParticipantId(participant),
+          { status: 'pending' },
+        ]),
       ),
       attachments: options.attachments?.map(attachment => ({ ...attachment })),
     };
     await this.storage.appendEvent(room.id, structuredClone(event));
 
     const deliveries = await Promise.all(recipients.map(async (participant) => {
-      const key = this.getDeliveryKey(room.id, event.id, participant.providerId);
+      const participantId = getCollaborationParticipantId(participant);
+      const key = this.getDeliveryKey(room.id, event.id, participantId);
       const abortController = new AbortController();
       this.abortControllers.set(key, abortController);
-      await this.setDelivery(room.id, event, participant.providerId, {
+      await this.setDelivery(room.id, event, participantId, {
         status: 'streaming',
         startedAt: this.now(),
       });
-      return { abortController, key, participant };
+      return { abortController, key, participant, participantId };
     }));
     const completion = Promise.allSettled(
       deliveries.map(delivery => this.dispatch(
         room,
         event,
         delivery.participant,
+        delivery.participantId,
         options.dispatch,
         delivery.abortController,
         delivery.key,
@@ -124,9 +129,9 @@ export class CollaborationCoordinator {
     return { event, completion };
   }
 
-  cancel(roomId: string, eventId: string, providerId: ProviderId): boolean {
+  cancel(roomId: string, eventId: string, participantId: string): boolean {
     const abortController = this.abortControllers.get(
-      this.getDeliveryKey(roomId, eventId, providerId),
+      this.getDeliveryKey(roomId, eventId, participantId),
     );
     if (!abortController) return false;
     abortController.abort();
@@ -137,6 +142,7 @@ export class CollaborationCoordinator {
     room: CollaborationRoom,
     event: CollaborationEvent,
     participant: CollaborationParticipant,
+    participantId: string,
     dispatch: CollaborationDispatch,
     abortController: AbortController,
     key: string,
@@ -148,18 +154,18 @@ export class CollaborationCoordinator {
       const result = await dispatch(participant, {
         eventId: event.id,
         roomId: room.id,
-        content: event.recipientContent?.[participant.providerId] ?? event.content,
+        content: event.recipientContent?.[participantId] ?? event.content,
       }, abortController.signal);
-      await this.setDelivery(room.id, event, participant.providerId, {
+      await this.setDelivery(room.id, event, participantId, {
         status: result.conflictFiles?.length ? 'conflict' : 'completed',
-        startedAt: event.delivery[participant.providerId]?.startedAt,
+        startedAt: event.delivery[participantId]?.startedAt,
         completedAt: this.now(),
         providerMessageId: result.providerMessageId,
         conflictFiles: result.conflictFiles,
       });
     } catch (error) {
-      const startedAt = event.delivery[participant.providerId]?.startedAt;
-      await this.setDelivery(room.id, event, participant.providerId, isAbortError(error)
+      const startedAt = event.delivery[participantId]?.startedAt;
+      await this.setDelivery(room.id, event, participantId, isAbortError(error)
         ? {
           status: 'cancelled',
           startedAt,
@@ -181,15 +187,15 @@ export class CollaborationCoordinator {
   private async setDelivery(
     roomId: string,
     event: CollaborationEvent,
-    providerId: ProviderId,
+    participantId: string,
     delivery: CollaborationDelivery,
   ): Promise<void> {
-    event.delivery[providerId] = delivery;
-    await this.storage.updateDelivery(roomId, event.id, providerId, delivery);
-    this.onDeliveryChanged?.(event, providerId, delivery);
+    event.delivery[participantId] = delivery;
+    await this.storage.updateDelivery(roomId, event.id, participantId, delivery);
+    this.onDeliveryChanged?.(event, participantId, delivery);
   }
 
-  private getDeliveryKey(roomId: string, eventId: string, providerId: ProviderId): string {
-    return `${roomId}:${eventId}:${providerId}`;
+  private getDeliveryKey(roomId: string, eventId: string, participantId: string): string {
+    return `${roomId}:${eventId}:${participantId}`;
   }
 }

@@ -32,9 +32,49 @@ function createRepository(conversation = createConversation()) {
   return { repository, sessions };
 }
 
+describe('ConversationRepository creation', () => {
+  it('persists a conversation-scoped runtime profile', async () => {
+    const { repository, sessions } = createRepository();
+
+    const conversation = await repository.create({
+      providerId: 'claude',
+      runtimeProfileId: 'company',
+    });
+
+    expect(conversation.runtimeProfileId).toBe('company');
+    expect(sessions.saveMetadata).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeProfileId: 'company',
+    }));
+  });
+});
+
 describe('ConversationRepository hydration', () => {
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('hydrates company Claude history from the company profile directory', async () => {
+    const hydrateConversationHistory = jest.fn().mockResolvedValue(undefined);
+    jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+      hydrateConversationHistory,
+    } as any);
+    const conversation = {
+      ...createConversation(),
+      runtimeProfileId: 'company',
+    };
+    const { repository } = createRepository(conversation);
+
+    await repository.ensureHydrated(conversation.id);
+
+    expect(hydrateConversationHistory).toHaveBeenCalledWith(
+      conversation,
+      '/vault',
+      expect.objectContaining({
+        environment: expect.objectContaining({
+          CLAUDE_CONFIG_DIR: expect.stringMatching(/\.claude-company$/),
+        }),
+      }),
+    );
   });
 
   it('returns cached metadata without hydrating provider history', () => {

@@ -106,6 +106,14 @@ export class ProviderRegistry {
     return this.getProviderRegistration(providerId).environmentKeyPatterns ?? [];
   }
 
+  static resolveRuntimeProfileEnvironment(
+    providerId: ProviderId,
+    profileId?: string,
+  ): Record<string, string> {
+    return this.getProviderRegistration(providerId)
+      .resolveRuntimeProfileEnvironment?.(profileId) ?? {};
+  }
+
   static getChatUIConfig(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): ProviderChatUIConfig {
     return this.getProviderRegistration(providerId).chatUIConfig;
   }

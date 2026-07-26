@@ -239,7 +239,7 @@ export default class ClaudianPlugin extends Plugin {
 
       this.addCommand({
         id: 'start-claude-codex-collaboration',
-        name: 'Start Claude + Codex collaboration',
+        name: 'Start Claude personal + Claude company + Codex collaboration',
         callback: async () => {
           const view = await this.ensureViewOpen();
           await view?.startClaudeCodexCollaboration();
@@ -751,6 +751,7 @@ export default class ClaudianPlugin extends Plugin {
     return {
       id: meta.id,
       providerId: meta.providerId ?? DEFAULT_CHAT_PROVIDER_ID,
+      runtimeProfileId: meta.runtimeProfileId,
       title: meta.title,
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
@@ -1171,6 +1172,7 @@ export default class ClaudianPlugin extends Plugin {
 
   async createConversation(options?: {
     providerId?: ProviderId;
+    runtimeProfileId?: string;
     sessionId?: string;
     selectedModel?: string;
   }): Promise<Conversation> {

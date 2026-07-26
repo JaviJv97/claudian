@@ -41,6 +41,7 @@ export interface FeatureHost {
 
   createConversation(options?: {
     providerId?: ProviderId;
+    runtimeProfileId?: string;
     sessionId?: string;
     selectedModel?: string;
   }): Promise<Conversation>;

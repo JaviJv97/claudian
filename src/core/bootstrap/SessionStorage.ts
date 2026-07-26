@@ -193,6 +193,7 @@ export class SessionStorage {
     return {
       id: conversation.id,
       providerId: conversation.providerId,
+      runtimeProfileId: conversation.runtimeProfileId,
       title: conversation.title,
       titleGenerationStatus: conversation.titleGenerationStatus,
       createdAt: conversation.createdAt,

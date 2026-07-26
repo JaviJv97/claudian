@@ -66,6 +66,8 @@ export interface ChatMessage {
 export interface Conversation {
   id: string;
   providerId: ProviderId;
+  /** Provider-owned runtime profile selector, such as a separate authenticated account. */
+  runtimeProfileId?: string;
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -114,6 +116,8 @@ export interface ConversationMeta {
 export interface SessionMetadata {
   id: string;
   providerId?: ProviderId;
+  /** Provider-owned runtime profile selector. */
+  runtimeProfileId?: string;
   title: string;
   titleGenerationStatus?: 'pending' | 'success' | 'failed';
   createdAt: number;

@@ -10,6 +10,7 @@ interface CollaborationTimelineOptions {
   component: Component;
   hostTab: TabData;
   participantTabs: TabData[];
+  participantLabels: Record<string, string>;
   plugin: FeatureHost;
   roomId: string;
   canStop: (providerId: ProviderId) => boolean;
@@ -30,12 +31,16 @@ interface CollaborationTimelineOptions {
   ) => Promise<void>;
 }
 
-function getProviderLabel(providerId: ProviderId): string {
-  return providerId === 'claude'
+function getFallbackParticipantLabel(participantId: string): string {
+  return participantId === 'claude'
     ? 'Claude'
-    : providerId === 'codex'
+    : participantId === 'codex'
       ? 'Codex'
-      : providerId;
+      : participantId;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export class CollaborationTimeline {
@@ -54,7 +59,7 @@ export class CollaborationTimeline {
     this.rootEl = options.hostTab.dom.contentEl.createDiv({
       cls: 'claudian-collaboration',
       attr: {
-        'aria-label': 'Claude and Codex collaboration room',
+        'aria-label': 'Claude personal, Claude company, and Codex collaboration room',
       },
     });
     options.hostTab.dom.contentEl.insertBefore(
@@ -130,33 +135,34 @@ export class CollaborationTimeline {
     allButton.addEventListener('click', () => this.selectRecipient('all', allButton));
 
     for (const tab of this.options.participantTabs) {
+      const participantId = this.getTabParticipantId(tab);
       const button = railEl.createEl('button', {
         cls: 'claudian-collaboration-recipient',
-        text: getProviderLabel(tab.providerId),
+        text: this.getParticipantLabel(participantId),
         attr: {
           type: 'button',
           'aria-pressed': 'false',
-          'data-provider': tab.providerId,
+          'data-provider': participantId,
         },
       });
       const statusEl = button.createSpan({
         cls: 'claudian-collaboration-status',
         attr: { 'aria-hidden': 'true' },
       });
-      this.statusEls.set(tab.providerId, statusEl);
-      button.addEventListener('click', () => this.selectRecipient(tab.providerId, button));
+      this.statusEls.set(participantId, statusEl);
+      button.addEventListener('click', () => this.selectRecipient(participantId, button));
 
       const stopButton = railEl.createEl('button', {
         cls: 'claudian-collaboration-stop',
         attr: {
           type: 'button',
-          'aria-label': `Stop ${getProviderLabel(tab.providerId)}`,
-          'data-provider': tab.providerId,
+          'aria-label': `Stop ${this.getParticipantLabel(participantId)}`,
+          'data-provider': participantId,
         },
       });
       setIcon(stopButton, 'square');
-      stopButton.addEventListener('click', () => this.options.onStop(tab.providerId));
-      this.stopEls.set(tab.providerId, stopButton);
+      stopButton.addEventListener('click', () => this.options.onStop(participantId));
+      this.stopEls.set(participantId, stopButton);
     }
   }
 
@@ -168,7 +174,12 @@ export class CollaborationTimeline {
     }
 
     const inputEl = this.options.hostTab.dom.inputEl;
-    const withoutMention = inputEl.value.replace(/^@(all|claude|codex)\s+/i, '');
+    const participantIds = this.options.participantTabs.map(tab => this.getTabParticipantId(tab));
+    const routeNames = ['all', ...participantIds].map(escapeRegExp).join('|');
+    const withoutMention = inputEl.value.replace(
+      new RegExp(`^@(?:${routeNames})\\s+`, 'i'),
+      '',
+    );
     inputEl.value = recipientId === 'all' ? withoutMention : `@${recipientId} ${withoutMention}`;
     const EventConstructor = inputEl.ownerDocument.defaultView?.Event ?? Event;
     inputEl.dispatchEvent(new EventConstructor('input', { bubbles: true }));
@@ -213,7 +224,7 @@ export class CollaborationTimeline {
       });
       messageEl.createDiv({
         cls: 'claudian-collaboration-author',
-        text: event.authorId === 'user' ? 'You' : getProviderLabel(event.authorId),
+        text: event.authorId === 'user' ? 'You' : this.getParticipantLabel(event.authorId),
       });
       const contentEl = messageEl.createDiv({
         cls: 'claudian-collaboration-content',
@@ -248,18 +259,18 @@ export class CollaborationTimeline {
             },
           });
           itemEl.createSpan({
-            text: `${getProviderLabel(providerId)}: ${delivery.status}`,
+            text: `${this.getParticipantLabel(providerId)}: ${delivery.status}`,
           });
         }
       }
       if (event.authorId !== 'user' && event.authorId !== 'system') {
-        const reviewer = this.options.participantTabs.find(tab => (
-          tab.providerId !== event.authorId
-        ))?.providerId;
+        const reviewer = this.options.participantTabs
+          .map(tab => this.getTabParticipantId(tab))
+          .find(participantId => participantId !== event.authorId);
         if (reviewer) {
           const reviewButton = messageEl.createEl('button', {
             cls: 'claudian-collaboration-review',
-            text: `Ask ${getProviderLabel(reviewer)} to review`,
+            text: `Ask ${this.getParticipantLabel(reviewer)} to review`,
             attr: { type: 'button' },
           });
           reviewButton.addEventListener('click', () => {
@@ -287,7 +298,7 @@ export class CollaborationTimeline {
       text: conflictFiles.length > 0
         ? `Review ${conflictFiles.join(', ')} before retrying.`
         : retryable.length === 1
-          ? `${getProviderLabel(retryable[0].providerId)} ${
+          ? `${this.getParticipantLabel(retryable[0].providerId)} ${
             retryable[0].status === 'cancelled' ? 'was stopped' : 'failed'
           }.`
           : 'Some responses need attention.',
@@ -327,13 +338,13 @@ export class CollaborationTimeline {
       const retryButton = actionsEl.createEl('button', {
         cls: 'claudian-collaboration-retry',
         text: delivery.status === 'conflict'
-          ? `Apply ${getProviderLabel(delivery.providerId)}`
-          : `Retry ${getProviderLabel(delivery.providerId)}`,
+          ? `Apply ${this.getParticipantLabel(delivery.providerId)}`
+          : `Retry ${this.getParticipantLabel(delivery.providerId)}`,
         attr: {
           type: 'button',
           'aria-label': delivery.status === 'conflict'
-            ? `Apply ${getProviderLabel(delivery.providerId)} proposal to the current file`
-            : `Retry with ${getProviderLabel(delivery.providerId)}`,
+            ? `Apply ${this.getParticipantLabel(delivery.providerId)} proposal to the current file`
+            : `Retry with ${this.getParticipantLabel(delivery.providerId)}`,
         },
       });
       retryButton.addEventListener('click', () => {
@@ -356,9 +367,9 @@ export class CollaborationTimeline {
   private syncRecipientSelection(): void {
     const input = this.options.hostTab.dom.inputEl.value.trimStart();
     const participant = this.options.participantTabs.find(tab => (
-      input.toLowerCase().startsWith(`@${tab.providerId.toLowerCase()} `)
+      input.toLowerCase().startsWith(`@${this.getTabParticipantId(tab).toLowerCase()} `)
     ));
-    const selectedProvider = participant?.providerId ?? 'all';
+    const selectedProvider = participant ? this.getTabParticipantId(participant) : 'all';
 
     for (const button of this.rootEl.querySelectorAll<HTMLElement>(
       '.claudian-collaboration-recipient',
@@ -382,7 +393,7 @@ export class CollaborationTimeline {
       return [{
         id: `live-${tab.id}-${message.id}`,
         kind: 'message' as const,
-        authorId: tab.providerId,
+        authorId: this.getTabParticipantId(tab),
         recipientIds: ['user' as const],
         content: message.content,
         createdAt: message.timestamp,
@@ -394,7 +405,8 @@ export class CollaborationTimeline {
 
   private updateParticipantStatuses(): void {
     for (const tab of this.options.participantTabs) {
-      const statusEl = this.statusEls.get(tab.providerId);
+      const participantId = this.getTabParticipantId(tab);
+      const statusEl = this.statusEls.get(participantId);
       if (!statusEl) continue;
       const status = tab.state.needsAttention
         ? 'attention'
@@ -402,17 +414,28 @@ export class CollaborationTimeline {
           ? 'streaming'
           : 'idle';
       statusEl.dataset.status = status;
-      statusEl.setAttribute('title', `${getProviderLabel(tab.providerId)}: ${status}`);
+      statusEl.setAttribute('title', `${this.getParticipantLabel(participantId)}: ${status}`);
       const recipientButton = statusEl.parentElement;
       recipientButton?.setAttribute(
         'aria-label',
-        `${getProviderLabel(tab.providerId)}, ${status}`,
+        `${this.getParticipantLabel(participantId)}, ${status}`,
       );
-      const stopButton = this.stopEls.get(tab.providerId);
-      const canStop = this.options.canStop(tab.providerId);
+      const stopButton = this.stopEls.get(participantId);
+      const canStop = this.options.canStop(participantId);
       stopButton?.toggleClass('claudian-hidden', !canStop);
       stopButton?.setAttribute('aria-hidden', canStop ? 'false' : 'true');
       if (stopButton) stopButton.disabled = !canStop;
     }
+  }
+
+  private getTabParticipantId(tab: TabData): string {
+    if (!tab.conversationId) return tab.providerId;
+    return this.options.plugin.getConversationSync(tab.conversationId)
+      ?.collaboration?.participantId ?? tab.providerId;
+  }
+
+  private getParticipantLabel(participantId: string): string {
+    return this.options.participantLabels[participantId]
+      ?? getFallbackParticipantLabel(participantId);
   }
 }

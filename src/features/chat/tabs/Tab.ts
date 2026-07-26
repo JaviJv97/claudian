@@ -814,6 +814,7 @@ export async function initializeTabService(
   if (
     tab.serviceInitialized
     && tab.service?.providerId === providerId
+    && tab.service.runtimeProfileId === conversation?.runtimeProfileId
     && !tab.runtimeSupervisor.isInvalidated
   ) {
     return;
@@ -833,6 +834,7 @@ export async function initializeTabService(
     const runtime = ProviderRegistry.createChatRuntime({
       plugin: plugin.providerHost,
       providerId,
+      runtimeProfileId: conversation?.runtimeProfileId,
     });
     service = runtime;
     unsubscribeReadyState = runtime.onReadyStateChange(() => {});
@@ -1646,7 +1648,12 @@ export function initializeTabControllers(
         syncSlashCommandDropdownForProvider(tab, plugin, getProviderCatalogConfig, conversation);
 
         // If the runtime already exists for the right provider, sync it passively
-        if (tab.service && tab.service.providerId === nextProviderId && conversation) {
+        if (
+          tab.service
+          && tab.service.providerId === nextProviderId
+          && tab.service.runtimeProfileId === conversation?.runtimeProfileId
+          && conversation
+        ) {
           const hasMessages = conversation.messages.length > 0;
           const externalContextPaths = hasMessages
             ? conversation.externalContextPaths || []

@@ -24,8 +24,8 @@ export function groupCollaborationTabBarItems(
 
     const roomItem: TabBarItem = {
       ...item,
-      title: 'Claude + Codex',
-      badgeLabel: 'Claude + Codex',
+      title: 'Claude ×2 + Codex',
+      badgeLabel: 'Claude ×2 + Codex',
       providerId: 'collaboration',
       canClose: false,
     };
