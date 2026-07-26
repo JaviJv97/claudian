@@ -16,6 +16,7 @@ export interface CollaborationDispatchRequest {
 
 export interface CollaborationDispatchResult {
   providerMessageId?: string;
+  conflictFiles?: string[];
 }
 
 export type CollaborationDispatch = (
@@ -150,10 +151,11 @@ export class CollaborationCoordinator {
         content: event.recipientContent?.[participant.providerId] ?? event.content,
       }, abortController.signal);
       await this.setDelivery(room.id, event, participant.providerId, {
-        status: 'completed',
+        status: result.conflictFiles?.length ? 'conflict' : 'completed',
         startedAt: event.delivery[participant.providerId]?.startedAt,
         completedAt: this.now(),
         providerMessageId: result.providerMessageId,
+        conflictFiles: result.conflictFiles,
       });
     } catch (error) {
       const startedAt = event.delivery[participant.providerId]?.startedAt;

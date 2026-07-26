@@ -92,4 +92,22 @@ describe('getLatestRetryableDeliveries', () => {
 
     expect(getLatestRetryableDeliveries(room)[0].content).toBe('inspect A');
   });
+
+  it('surfaces shared-file conflicts with their affected paths', () => {
+    const room = createRoom();
+    room.events[0].delivery = {
+      claude: {
+        status: 'conflict',
+        conflictFiles: ['Shared.md'],
+      },
+    };
+
+    expect(getLatestRetryableDeliveries(room)).toEqual([{
+      providerId: 'claude',
+      status: 'conflict',
+      content: 'Compare',
+      eventId: 'event-1',
+      conflictFiles: ['Shared.md'],
+    }]);
+  });
 });

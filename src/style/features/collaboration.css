@@ -167,6 +167,10 @@
   color: var(--text-error);
 }
 
+.claudian-collaboration-delivery-item[data-status="conflict"] {
+  color: var(--text-warning);
+}
+
 .claudian-collaboration-recovery {
   display: flex;
   min-height: 44px;

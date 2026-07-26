@@ -24,6 +24,11 @@ import {
   type ScheduledAnimationFrame,
 } from '../../utils/animationFrame';
 import type { FeatureHost } from '../FeatureHost';
+import {
+  captureCollaborationFileSnapshot,
+  findChangedSharedFiles,
+  findSharedReferencedFiles,
+} from './collaboration/collaborationFileConflicts';
 import { findCollaborationRebindCandidates } from './collaboration/collaborationRebinding';
 import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
 import { groupCollaborationTabBarItems } from './collaboration/collaborationTabs';
@@ -588,6 +593,25 @@ export class ClaudianView extends ItemView {
       content,
       room.participants.map(participant => participant.providerId),
     );
+    const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
+    const sharedReferencedFiles = findSharedReferencedFiles(
+      Object.fromEntries(collaborationTurn.recipientIds.map(providerId => [
+        providerId,
+        collaborationTurn.recipientContent?.[providerId] ?? collaborationTurn.content,
+      ])),
+      markdownFiles.map(file => file.path),
+    );
+    const captureSharedFileSnapshot = async () => captureCollaborationFileSnapshot(
+      (await Promise.all(sharedReferencedFiles.map(async (path) => {
+        const stat = await this.plugin.app.vault.adapter.stat(path);
+        return {
+          path,
+          mtime: stat?.mtime ?? -1,
+          size: stat?.size ?? -1,
+        };
+      }))),
+    );
+    const fileBaseline = await captureSharedFileSnapshot();
     const turn = await this.collaborationCoordinator.send(room, {
       content: collaborationTurn.content,
       recipientIds: collaborationTurn.recipientIds,
@@ -657,7 +681,15 @@ export class ClaudianView extends ItemView {
         if (!assistantMessage) {
           throw new Error(`${participant.providerId} completed without a new assistant response`);
         }
-        return { providerMessageId: assistantMessage?.assistantMessageId };
+        const conflictFiles = findChangedSharedFiles(
+          fileBaseline,
+          await captureSharedFileSnapshot(),
+          sharedReferencedFiles,
+        );
+        return {
+          providerMessageId: assistantMessage?.assistantMessageId,
+          conflictFiles: conflictFiles.length > 0 ? conflictFiles : undefined,
+        };
       },
     });
     for (const providerId of collaborationTurn.recipientIds) {

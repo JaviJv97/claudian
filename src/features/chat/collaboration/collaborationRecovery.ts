@@ -6,9 +6,10 @@ import type {
 
 export interface RetryableCollaborationDelivery {
   providerId: ProviderId;
-  status: Extract<CollaborationDeliveryStatus, 'failed' | 'cancelled'>;
+  status: Extract<CollaborationDeliveryStatus, 'failed' | 'cancelled' | 'conflict'>;
   content: string;
   eventId: string;
+  conflictFiles?: string[];
 }
 
 export function getLatestRetryableDeliveries(
@@ -18,12 +19,15 @@ export function getLatestRetryableDeliveries(
   if (!latestUserEvent) return [];
 
   return Object.entries(latestUserEvent.delivery).flatMap(([providerId, delivery]) => (
-    delivery.status === 'failed' || delivery.status === 'cancelled'
+    delivery.status === 'failed'
+      || delivery.status === 'cancelled'
+      || delivery.status === 'conflict'
       ? [{
         providerId,
         status: delivery.status,
         content: latestUserEvent.recipientContent?.[providerId] ?? latestUserEvent.content,
         eventId: latestUserEvent.id,
+        conflictFiles: delivery.conflictFiles,
       }]
       : []
   ));

@@ -181,6 +181,32 @@ describe('CollaborationCoordinator', () => {
     }));
   });
 
+  it('records a conflict when dispatch reports a changed shared file', async () => {
+    const room = createRoom();
+    const storage = createStorage(room);
+    const coordinator = new CollaborationCoordinator({
+      storage,
+      generateId: () => 'event-1',
+      now: () => 10,
+    });
+
+    const turn = await coordinator.send(room, {
+      content: 'Edit Shared.md',
+      recipientIds: ['claude'],
+      dispatch: async () => ({
+        providerMessageId: 'claude-message',
+        conflictFiles: ['Shared.md'],
+      }),
+    });
+    await turn.completion;
+
+    expect(room.events[0].delivery.claude).toEqual(expect.objectContaining({
+      status: 'conflict',
+      providerMessageId: 'claude-message',
+      conflictFiles: ['Shared.md'],
+    }));
+  });
+
   it('cancels only the selected participant', async () => {
     const room = createRoom();
     const storage = createStorage(room);

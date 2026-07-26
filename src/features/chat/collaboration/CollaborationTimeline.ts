@@ -271,13 +271,18 @@ export class CollaborationTimeline {
     this.recoveryEl.toggleClass('claudian-hidden', retryable.length === 0);
     if (retryable.length === 0) return;
 
+    const conflictFiles = [...new Set(
+      retryable.flatMap(delivery => delivery.conflictFiles ?? []),
+    )];
     this.recoveryEl.createSpan({
       cls: 'claudian-collaboration-recovery-label',
-      text: retryable.length === 1
-        ? `${getProviderLabel(retryable[0].providerId)} ${
-          retryable[0].status === 'cancelled' ? 'was stopped' : 'failed'
-        }.`
-        : 'Some responses need attention.',
+      text: conflictFiles.length > 0
+        ? `Review ${conflictFiles.join(', ')} before retrying.`
+        : retryable.length === 1
+          ? `${getProviderLabel(retryable[0].providerId)} ${
+            retryable[0].status === 'cancelled' ? 'was stopped' : 'failed'
+          }.`
+          : 'Some responses need attention.',
     });
     const actionsEl = this.recoveryEl.createDiv({
       cls: 'claudian-collaboration-recovery-actions',
