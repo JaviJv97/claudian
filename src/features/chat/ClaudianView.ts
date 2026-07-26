@@ -789,6 +789,27 @@ export class ClaudianView extends ItemView {
           onRetry: async (providerId, content) => {
             await this.routeCollaborationMessage(tab.id, `@${providerId} ${content}`);
           },
+          onOpenFile: async (path) => {
+            await this.plugin.app.workspace.openLinkText(path, '', false);
+          },
+          onKeepCurrent: async (eventId) => {
+            await this.resolveCollaborationConflict(roomId, eventId, 'kept-current');
+          },
+          onResolve: async (eventId, providerId, content, conflictFiles) => {
+            const fileList = conflictFiles.join(', ');
+            await this.routeCollaborationMessage(
+              tab.id,
+              `@${providerId} Resolve the collaboration conflict in ${fileList}. Re-read ${
+                conflictFiles.length === 1 ? 'the file' : 'each file'
+              } immediately before editing. Apply your originally requested change to the current version, even if the original source text has changed. Preserve unrelated content and report exactly what you changed.\n\nOriginal request:\n${content}`,
+            );
+            await this.resolveCollaborationConflict(
+              roomId,
+              eventId,
+              'applied-proposal',
+              providerId,
+            );
+          },
           onReview: async (reviewerId, sourceProviderId, content) => {
             const sourceLabel = ProviderRegistry.getProviderDisplayName(sourceProviderId);
             await this.routeCollaborationMessage(
@@ -800,6 +821,28 @@ export class ClaudianView extends ItemView {
       }
     }
     this.updateTabBar();
+  }
+
+  private async resolveCollaborationConflict(
+    roomId: string,
+    eventId: string,
+    resolution: 'kept-current' | 'applied-proposal',
+    resolutionProviderId?: ProviderId,
+  ): Promise<void> {
+    const currentRoom = await this.plugin.storage.rooms.get(roomId);
+    const event = currentRoom?.events.find(candidate => candidate.id === eventId);
+    if (!event) throw new Error(`Collaboration event not found: ${eventId}`);
+
+    await Promise.all(Object.entries(event.delivery).map(async ([providerId, delivery]) => {
+      if (delivery.status !== 'conflict') return;
+      await this.plugin.storage.rooms.updateDelivery(roomId, eventId, providerId, {
+        ...delivery,
+        status: 'resolved',
+        resolution,
+        resolutionProviderId,
+      });
+    }));
+    this.refreshCollaborationTimelines(roomId);
   }
 
   private async handleTabConversationRebind(

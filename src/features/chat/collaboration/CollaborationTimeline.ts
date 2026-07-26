@@ -15,6 +15,14 @@ interface CollaborationTimelineOptions {
   canStop: (providerId: ProviderId) => boolean;
   onStop: (providerId: ProviderId) => void;
   onRetry: (providerId: ProviderId, content: string) => Promise<void>;
+  onOpenFile: (path: string) => Promise<void>;
+  onKeepCurrent: (eventId: string) => Promise<void>;
+  onResolve: (
+    eventId: string,
+    providerId: ProviderId,
+    content: string,
+    conflictFiles: string[],
+  ) => Promise<void>;
   onReview: (
     reviewerId: ProviderId,
     sourceProviderId: ProviderId,
@@ -287,18 +295,58 @@ export class CollaborationTimeline {
     const actionsEl = this.recoveryEl.createDiv({
       cls: 'claudian-collaboration-recovery-actions',
     });
+    if (conflictFiles.length > 0) {
+      const openButton = actionsEl.createEl('button', {
+        cls: 'claudian-collaboration-retry',
+        text: 'Open note',
+        attr: {
+          type: 'button',
+          'aria-label': `Open ${conflictFiles[0]}`,
+        },
+      });
+      openButton.addEventListener('click', () => {
+        void this.options.onOpenFile(conflictFiles[0]);
+      });
+
+      const keepButton = actionsEl.createEl('button', {
+        cls: 'claudian-collaboration-retry',
+        text: 'Keep current',
+        attr: {
+          type: 'button',
+          'aria-label': `Keep the current version of ${conflictFiles.join(', ')}`,
+        },
+      });
+      keepButton.addEventListener('click', () => {
+        keepButton.disabled = true;
+        void this.options.onKeepCurrent(retryable[0].eventId).catch(() => {
+          keepButton.disabled = false;
+        });
+      });
+    }
     for (const delivery of retryable) {
       const retryButton = actionsEl.createEl('button', {
         cls: 'claudian-collaboration-retry',
-        text: `Retry ${getProviderLabel(delivery.providerId)}`,
+        text: delivery.status === 'conflict'
+          ? `Apply ${getProviderLabel(delivery.providerId)}`
+          : `Retry ${getProviderLabel(delivery.providerId)}`,
         attr: {
           type: 'button',
-          'aria-label': `Retry with ${getProviderLabel(delivery.providerId)}`,
+          'aria-label': delivery.status === 'conflict'
+            ? `Apply ${getProviderLabel(delivery.providerId)} proposal to the current file`
+            : `Retry with ${getProviderLabel(delivery.providerId)}`,
         },
       });
       retryButton.addEventListener('click', () => {
         retryButton.disabled = true;
-        void this.options.onRetry(delivery.providerId, delivery.content).catch(() => {
+        const action = delivery.status === 'conflict'
+          ? this.options.onResolve(
+            delivery.eventId,
+            delivery.providerId,
+            delivery.content,
+            delivery.conflictFiles ?? conflictFiles,
+          )
+          : this.options.onRetry(delivery.providerId, delivery.content);
+        void action.catch(() => {
           retryButton.disabled = false;
         });
       });

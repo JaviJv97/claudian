@@ -7,6 +7,7 @@ export type CollaborationDeliveryStatus =
   | 'streaming'
   | 'completed'
   | 'conflict'
+  | 'resolved'
   | 'failed'
   | 'cancelled';
 
@@ -28,6 +29,8 @@ export interface CollaborationDelivery {
   error?: string;
   providerMessageId?: string;
   conflictFiles?: string[];
+  resolution?: 'kept-current' | 'applied-proposal';
+  resolutionProviderId?: ProviderId;
 }
 
 export interface CollaborationAttachment {
