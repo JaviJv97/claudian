@@ -87,6 +87,7 @@ export class TabBar {
       cls: [
         'claudian-tab-badge',
         stateClass,
+        item.badgeLabel ? 'claudian-tab-badge-labeled' : '',
         isTitleExpanded ? 'claudian-tab-badge-expanded' : '',
       ].filter(Boolean).join(' '),
       text: this.getBadgeLabel(item),
@@ -106,6 +107,7 @@ export class TabBar {
     badgeEl.addEventListener('dblclick', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (item.badgeLabel) return;
       this.toggleBadgeTitle(item, badgeEl);
     });
 
@@ -173,6 +175,9 @@ export class TabBar {
   }
 
   private getBadgeLabel(item: TabBarItem): string {
+    if (item.badgeLabel) {
+      return item.badgeLabel;
+    }
     if (!this.expandedTitleTabIds.has(item.id)) {
       return String(item.index);
     }

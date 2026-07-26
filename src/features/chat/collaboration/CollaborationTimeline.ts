@@ -66,6 +66,11 @@ export class CollaborationTimeline {
         onAttentionChanged: () => this.scheduleRender(),
       }));
     }
+    const syncRecipientSelection = () => this.syncRecipientSelection();
+    options.hostTab.dom.inputEl.addEventListener('input', syncRecipientSelection);
+    this.cleanups.push(() => (
+      options.hostTab.dom.inputEl.removeEventListener('input', syncRecipientSelection)
+    ));
     this.scheduleRender();
   }
 
@@ -82,7 +87,14 @@ export class CollaborationTimeline {
   private buildParticipantRail(): void {
     const railEl = this.rootEl.createDiv({
       cls: 'claudian-collaboration-rail',
-      attr: { 'aria-label': 'Message recipients' },
+      attr: {
+        'aria-label': 'Message recipients',
+        title: 'Choose who receives the next message. You do not need to type an @ mention.',
+      },
+    });
+    railEl.createSpan({
+      cls: 'claudian-collaboration-rail-label',
+      text: 'Send to',
     });
     const allButton = railEl.createEl('button', {
       cls: 'claudian-collaboration-recipient is-selected',
@@ -90,6 +102,7 @@ export class CollaborationTimeline {
       attr: {
         type: 'button',
         'aria-pressed': 'true',
+        'data-provider': 'all',
       },
     });
     allButton.addEventListener('click', () => this.selectRecipient('all', allButton));
@@ -146,6 +159,7 @@ export class CollaborationTimeline {
   }
 
   private async render(generation: number): Promise<void> {
+    this.syncRecipientSelection();
     this.updateParticipantStatuses();
     const room = await this.options.plugin.storage.rooms.get(this.options.roomId);
     if (!room || generation !== this.renderGeneration) return;
@@ -246,6 +260,22 @@ export class CollaborationTimeline {
       if (generation !== this.renderGeneration) return;
     }
     this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
+  }
+
+  private syncRecipientSelection(): void {
+    const input = this.options.hostTab.dom.inputEl.value.trimStart();
+    const participant = this.options.participantTabs.find(tab => (
+      input.toLowerCase().startsWith(`@${tab.providerId.toLowerCase()} `)
+    ));
+    const selectedProvider = participant?.providerId ?? 'all';
+
+    for (const button of this.rootEl.querySelectorAll<HTMLElement>(
+      '.claudian-collaboration-recipient',
+    )) {
+      const selected = button.dataset.provider === selectedProvider;
+      button.toggleClass('is-selected', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
   }
 
   private getLiveAssistantEvents(room: CollaborationRoom): CollaborationEvent[] {

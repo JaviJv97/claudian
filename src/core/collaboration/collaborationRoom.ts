@@ -40,3 +40,17 @@ export function resolveCollaborationRecipients(
 
   return mentioned.length > 0 ? mentioned : [...participantIds];
 }
+
+export function resolveCollaborationTurn(
+  message: string,
+  participantIds: readonly ProviderId[],
+): { content: string; recipientIds: ProviderId[] } {
+  const recipientIds = resolveCollaborationRecipients(message, participantIds);
+  const routeNames = ['all', ...participantIds].map(escapeRegExp).join('|');
+  const leadingRoute = new RegExp(`^\\s*@(?:${routeNames})\\b\\s*`, 'i');
+
+  return {
+    content: message.replace(leadingRoute, '').trim(),
+    recipientIds,
+  };
+}

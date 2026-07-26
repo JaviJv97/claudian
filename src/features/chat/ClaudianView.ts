@@ -5,7 +5,7 @@ import { CollaborationCoordinator } from '../../core/collaboration/Collaboration
 import {
   createCollaborationMemberships,
   createCollaborationRoomId,
-  resolveCollaborationRecipients,
+  resolveCollaborationTurn,
 } from '../../core/collaboration/collaborationRoom';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
@@ -24,6 +24,7 @@ import {
   type ScheduledAnimationFrame,
 } from '../../utils/animationFrame';
 import type { FeatureHost } from '../FeatureHost';
+import { groupCollaborationTabBarItems } from './collaboration/collaborationTabs';
 import { CollaborationTimeline } from './collaboration/CollaborationTimeline';
 import type { HistoryConversationStatus } from './controllers/ConversationController';
 import { MentionCacheCoordinator } from './services/MentionCacheCoordinator';
@@ -576,13 +577,13 @@ export class ClaudianView extends ItemView {
       return true;
     }
 
-    const recipientIds = resolveCollaborationRecipients(
+    const collaborationTurn = resolveCollaborationTurn(
       content,
       room.participants.map(participant => participant.providerId),
     );
     const turn = await this.collaborationCoordinator.send(room, {
-      content,
-      recipientIds,
+      content: collaborationTurn.content,
+      recipientIds: collaborationTurn.recipientIds,
       attachments: images,
       dispatch: async (participant, request, signal) => {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
@@ -706,6 +707,7 @@ export class ClaudianView extends ItemView {
         }));
       }
     }
+    this.updateTabBar();
   }
 
   private refreshCollaborationTimelines(roomId: string): void {
@@ -744,8 +746,7 @@ export class ClaudianView extends ItemView {
   private updateTabBarVisibility(): void {
     if (!this.tabBarContainerEl || !this.tabManager) return;
 
-    const tabCount = this.getVisibleTabBarItems().length;
-    const showTabBar = tabCount >= 2;
+    const showTabBar = this.tabManager.getTabCount() >= 2;
 
     this.tabBarContainerEl.toggleClass('claudian-hidden', !showTabBar);
 
@@ -755,39 +756,11 @@ export class ClaudianView extends ItemView {
   private getVisibleTabBarItems(): TabBarItem[] {
     if (!this.tabManager) return [];
     if (typeof this.tabManager.getTabBarItems !== 'function') return [];
-    const items = this.tabManager.getTabBarItems();
-    const grouped = new Map<string, TabBarItem>();
-    const visible: TabBarItem[] = [];
-
-    for (const item of items) {
-      const tab = this.tabManager.getTab(item.id);
-      const membership = tab?.conversationId
-        ? this.plugin.getConversationSync(tab.conversationId)?.collaboration
-        : null;
-      if (!membership) {
-        visible.push(item);
-        continue;
-      }
-
-      const existing = grouped.get(membership.roomId);
-      if (existing) {
-        existing.isActive = existing.isActive || item.isActive;
-        existing.isStreaming = existing.isStreaming || item.isStreaming;
-        existing.needsAttention = existing.needsAttention || item.needsAttention;
-        continue;
-      }
-
-      const roomItem: TabBarItem = {
-        ...item,
-        title: 'Claude + Codex',
-        providerId: 'collaboration',
-        canClose: false,
-      };
-      grouped.set(membership.roomId, roomItem);
-      visible.push(roomItem);
-    }
-
-    return visible.map((item, index) => ({ ...item, index: index + 1 }));
+    return groupCollaborationTabBarItems(this.tabManager.getTabBarItems(), (tabId) => {
+      const item = this.tabManager?.getTab(tabId);
+      if (!item?.conversationId) return null;
+      return this.plugin.getConversationSync(item.conversationId)?.collaboration?.roomId ?? null;
+    });
   }
 
   private updateNewTabButtonVisibility(): void {

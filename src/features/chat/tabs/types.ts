@@ -324,6 +324,8 @@ export interface TabBarItem {
   /** 1-based index for display. */
   index: number;
   title: string;
+  /** Optional persistent label used instead of the compact numeric index. */
+  badgeLabel?: string;
   providerId: ProviderId;
   isActive: boolean;
   isStreaming: boolean;

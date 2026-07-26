@@ -1,6 +1,7 @@
 import {
   createCollaborationMemberships,
   resolveCollaborationRecipients,
+  resolveCollaborationTurn,
 } from '@/core/collaboration/collaborationRoom';
 
 describe('collaboration rooms', () => {
@@ -46,5 +47,31 @@ describe('collaboration rooms', () => {
       'The @claudette example is unrelated',
       ['claude', 'codex'],
     )).toEqual(['claude', 'codex']);
+  });
+
+  it.each([
+    ['@claude review this', ['claude'], 'review this'],
+    ['  @codex   implement this', ['codex'], 'implement this'],
+    ['@all compare approaches', ['claude', 'codex'], 'compare approaches'],
+    ['No explicit recipient', ['claude', 'codex'], 'No explicit recipient'],
+  ])('resolves and removes a leading routing directive from %s', (
+    message,
+    recipientIds,
+    content,
+  ) => {
+    expect(resolveCollaborationTurn(message, ['claude', 'codex'])).toEqual({
+      recipientIds,
+      content,
+    });
+  });
+
+  it('preserves non-routing mentions in the provider prompt', () => {
+    expect(resolveCollaborationTurn(
+      'Ask @codex, then @claude',
+      ['claude', 'codex'],
+    )).toEqual({
+      recipientIds: ['claude', 'codex'],
+      content: 'Ask @codex, then @claude',
+    });
   });
 });
