@@ -944,17 +944,10 @@ export class ClaudianView extends ItemView {
     // Some lightweight test hosts construct the view without running field initializers.
     if (!this.collaborationTimelines) return;
     const tabs = this.tabManager?.getAllTabs() ?? [];
-    const liveTabIds = new Set(tabs.map(tab => tab.id));
-    for (const [tabId, timeline] of this.collaborationTimelines) {
-      const tab = tabs.find(candidate => candidate.id === tabId);
-      const conversation = tab?.conversationId
-        ? this.plugin.getConversationSync(tab.conversationId)
-        : null;
-      if (!liveTabIds.has(tabId) || !conversation?.collaboration) {
-        timeline.destroy();
-        this.collaborationTimelines.delete(tabId);
-      }
-    }
+    // Rebuild from the complete room roster. Room creation opens participants
+    // sequentially, so retaining an early timeline can leave later agents absent.
+    for (const timeline of this.collaborationTimelines.values()) timeline.destroy();
+    this.collaborationTimelines.clear();
 
     const tabsByRoom = new Map<string, TabData[]>();
     for (const tab of tabs) {
@@ -1021,7 +1014,6 @@ export class ClaudianView extends ItemView {
       }
       if (roomTabs.length < 2) continue;
       for (const tab of roomTabs) {
-        if (this.collaborationTimelines.has(tab.id)) continue;
         this.collaborationTimelines.set(tab.id, new CollaborationTimeline({
           component: this,
           hostTab: tab,

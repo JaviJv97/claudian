@@ -112,6 +112,20 @@ export class CollaborationTimeline {
   }
 
   private buildParticipantRail(containerEl: HTMLElement): void {
+    const participantIds = Object.keys(this.options.participantLabels);
+    const rosterEl = containerEl.createDiv({
+      cls: 'claudian-collaboration-roster',
+      attr: { 'aria-label': 'Agents in this collaboration room' },
+    });
+    rosterEl.createSpan({
+      cls: 'claudian-collaboration-roster-label',
+      text: 'In this room',
+    });
+    rosterEl.createSpan({
+      cls: 'claudian-collaboration-roster-members',
+      text: participantIds.map(id => this.getParticipantLabel(id)).join(' · '),
+    });
+
     const railEl = containerEl.createDiv({
       cls: 'claudian-collaboration-rail',
       attr: {
@@ -121,7 +135,7 @@ export class CollaborationTimeline {
     });
     railEl.createSpan({
       cls: 'claudian-collaboration-rail-label',
-      text: 'Send to',
+      text: 'Send message to',
     });
     const allButton = railEl.createEl('button', {
       cls: 'claudian-collaboration-recipient is-selected',
@@ -134,8 +148,7 @@ export class CollaborationTimeline {
     });
     allButton.addEventListener('click', () => this.selectRecipient('all', allButton));
 
-    for (const tab of this.options.participantTabs) {
-      const participantId = this.getTabParticipantId(tab);
+    for (const participantId of participantIds) {
       const button = railEl.createEl('button', {
         cls: 'claudian-collaboration-recipient',
         text: this.getParticipantLabel(participantId),
@@ -174,7 +187,7 @@ export class CollaborationTimeline {
     }
 
     const inputEl = this.options.hostTab.dom.inputEl;
-    const participantIds = this.options.participantTabs.map(tab => this.getTabParticipantId(tab));
+    const participantIds = Object.keys(this.options.participantLabels);
     const routeNames = ['all', ...participantIds].map(escapeRegExp).join('|');
     const withoutMention = inputEl.value.replace(
       new RegExp(`^@(?:${routeNames})\\s+`, 'i'),
@@ -366,10 +379,10 @@ export class CollaborationTimeline {
 
   private syncRecipientSelection(): void {
     const input = this.options.hostTab.dom.inputEl.value.trimStart();
-    const participant = this.options.participantTabs.find(tab => (
-      input.toLowerCase().startsWith(`@${this.getTabParticipantId(tab).toLowerCase()} `)
+    const participant = Object.keys(this.options.participantLabels).find(participantId => (
+      input.toLowerCase().startsWith(`@${participantId.toLowerCase()} `)
     ));
-    const selectedProvider = participant ? this.getTabParticipantId(participant) : 'all';
+    const selectedProvider = participant ?? 'all';
 
     for (const button of this.rootEl.querySelectorAll<HTMLElement>(
       '.claudian-collaboration-recipient',

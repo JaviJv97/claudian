@@ -16,7 +16,7 @@ function createItem(overrides: Partial<TabBarItem>): TabBarItem {
 }
 
 describe('groupCollaborationTabBarItems', () => {
-  it('collapses participant tabs into one attributed room badge', () => {
+  it('collapses participant tabs into an accurate participant-count badge', () => {
     const items = [
       createItem({ id: 'claude-tab', providerId: 'claude', isStreaming: true }),
       createItem({
@@ -34,13 +34,28 @@ describe('groupCollaborationTabBarItems', () => {
       expect.objectContaining({
         id: 'claude-tab',
         index: 1,
-        title: 'Claude ×2 + Codex',
-        badgeLabel: 'Claude ×2 + Codex',
+        title: 'Collaboration room with 2 agents',
+        badgeLabel: '2 agents',
         isActive: true,
         isStreaming: true,
         canClose: false,
       }),
     ]);
+  });
+
+  it('does not reuse the three-agent label for a two-agent room', () => {
+    const items = [
+      createItem({ id: 'personal-tab', providerId: 'claude' }),
+      createItem({ id: 'codex-tab', providerId: 'codex' }),
+    ];
+
+    const [badge] = groupCollaborationTabBarItems(
+      items,
+      tabId => tabId.endsWith('-tab') ? 'room-1' : null,
+    );
+
+    expect(badge.badgeLabel).toBe('2 agents');
+    expect(badge.title).toBe('Collaboration room with 2 agents');
   });
 
   it('preserves ordinary tabs and renumbers the visible sequence', () => {

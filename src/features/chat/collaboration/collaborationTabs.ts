@@ -4,7 +4,7 @@ export function groupCollaborationTabBarItems(
   items: readonly TabBarItem[],
   getRoomId: (tabId: TabId) => string | null,
 ): TabBarItem[] {
-  const grouped = new Map<string, TabBarItem>();
+  const grouped = new Map<string, { item: TabBarItem; participantCount: number }>();
   const visible: TabBarItem[] = [];
 
   for (const item of items) {
@@ -16,20 +16,24 @@ export function groupCollaborationTabBarItems(
 
     const existing = grouped.get(roomId);
     if (existing) {
-      existing.isActive = existing.isActive || item.isActive;
-      existing.isStreaming = existing.isStreaming || item.isStreaming;
-      existing.needsAttention = existing.needsAttention || item.needsAttention;
+      existing.item.isActive = existing.item.isActive || item.isActive;
+      existing.item.isStreaming = existing.item.isStreaming || item.isStreaming;
+      existing.item.needsAttention = existing.item.needsAttention || item.needsAttention;
+      existing.participantCount += 1;
+      const agentLabel = `${existing.participantCount} agents`;
+      existing.item.title = `Collaboration room with ${agentLabel}`;
+      existing.item.badgeLabel = agentLabel;
       continue;
     }
 
     const roomItem: TabBarItem = {
       ...item,
-      title: 'Claude ×2 + Codex',
-      badgeLabel: 'Claude ×2 + Codex',
+      title: 'Collaboration room with 1 agent',
+      badgeLabel: '1 agent',
       providerId: 'collaboration',
       canClose: false,
     };
-    grouped.set(roomId, roomItem);
+    grouped.set(roomId, { item: roomItem, participantCount: 1 });
     visible.push(roomItem);
   }
 

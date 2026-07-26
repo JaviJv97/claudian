@@ -19,6 +19,28 @@
   padding: 4px 8px;
 }
 
+.claudian-collaboration-roster {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-roster-label {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.claudian-collaboration-roster-members {
+  overflow: hidden;
+  color: var(--text-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .claudian-collaboration-rail-label {
   margin-inline-end: 2px;
   color: var(--text-faint);
