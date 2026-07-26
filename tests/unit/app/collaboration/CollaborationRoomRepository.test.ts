@@ -155,6 +155,80 @@ describe('CollaborationRoomRepository', () => {
     expect(room?.updatedAt).toBe(110);
   });
 
+  it('archives and reopens a room without losing its history', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [
+        { id: 'claude-personal', providerId: 'claude', conversationId: 'conversation-claude' },
+        { id: 'codex', providerId: 'codex', conversationId: 'conversation-codex' },
+      ],
+      now: 100,
+    });
+
+    const archived = await repository.archive('room-1', 110);
+    expect(archived.status).toBe('archived');
+    expect(archived.archivedAt).toBe(110);
+
+    const reopened = await repository.reopen('room-1', 120);
+    expect(reopened.status).toBe('active');
+    expect(reopened.archivedAt).toBeUndefined();
+    expect(reopened.participants).toHaveLength(2);
+    expect(reopened.updatedAt).toBe(120);
+  });
+
+  it('lists rooms newest first and includes archived rooms', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({ id: 'older', title: 'Older', participants: [], now: 100 });
+    await repository.create({ id: 'newer', title: 'Newer', participants: [], now: 200 });
+    await repository.archive('older', 300);
+
+    expect((await repository.list()).map(room => [room.id, room.status])).toEqual([
+      ['older', 'archived'],
+      ['newer', 'active'],
+    ]);
+  });
+
+  it('replaces one participant atomically while preserving the room-local identity', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [
+        {
+          id: 'claude-company',
+          providerId: 'claude',
+          runtimeProfileId: 'company',
+          label: 'Claude Company',
+          conversationId: 'conversation-old',
+        },
+        { id: 'codex', providerId: 'codex', conversationId: 'conversation-codex' },
+      ],
+      now: 100,
+    });
+
+    const room = await repository.replaceParticipant('room-1', 'claude-company', {
+      id: 'claude-work',
+      providerId: 'claude',
+      runtimeProfileId: 'work',
+      label: 'Claude Work',
+      conversationId: 'conversation-new',
+    }, 110);
+
+    expect(room.participants).toEqual([
+      {
+        id: 'claude-work',
+        providerId: 'claude',
+        runtimeProfileId: 'work',
+        label: 'Claude Work',
+        conversationId: 'conversation-new',
+      },
+      { id: 'codex', providerId: 'codex', conversationId: 'conversation-codex' },
+    ]);
+    expect(room.updatedAt).toBe(110);
+  });
+
   it.each(['', '../escape', 'nested/room', '/absolute'])(
     'rejects unsafe room id %p',
     async (id) => {

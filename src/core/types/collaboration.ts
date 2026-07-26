@@ -65,6 +65,9 @@ export interface CollaborationRoom {
   version: 1;
   id: string;
   title: string;
+  /** Missing on legacy rooms and treated as active. */
+  status?: 'active' | 'archived';
+  archivedAt?: number;
   createdAt: number;
   updatedAt: number;
   participants: CollaborationParticipant[];

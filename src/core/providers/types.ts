@@ -47,6 +47,13 @@ export interface CreateChatRuntimeOptions {
   runtimeProfileId?: string;
 }
 
+export interface ProviderRuntimeProfile {
+  id: string;
+  label: string;
+  available: boolean;
+  unavailableReason?: string;
+}
+
 /**
  * Chat-facing provider registration.
  *
@@ -62,7 +69,11 @@ export interface ProviderRegistration {
   setEnabled?: (settings: Record<string, unknown>, enabled: boolean) => void;
   capabilities: ProviderCapabilities;
   environmentKeyPatterns?: RegExp[];
-  resolveRuntimeProfileEnvironment?: (profileId?: string) => Record<string, string>;
+  resolveRuntimeProfileEnvironment?: (
+    profileId?: string,
+    settings?: Record<string, unknown>,
+  ) => Record<string, string>;
+  getRuntimeProfiles?: (settings: Record<string, unknown>) => ProviderRuntimeProfile[];
   chatUIConfig: ProviderChatUIConfig;
   settingsReconciler: ProviderSettingsReconciler;
   createRuntime: (options: CreateChatRuntimeOptions) => ChatRuntime;

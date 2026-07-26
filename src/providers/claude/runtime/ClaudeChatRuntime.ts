@@ -808,7 +808,7 @@ export class ClaudianService implements ChatRuntime {
   private buildQueryOptionsContext(vaultPath: string, cliPath: string): QueryOptionsContext {
     const customEnv = {
       ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
-      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId),
+      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings),
     };
     const enhancedPath = getEnhancedPath(customEnv.PATH, cliPath);
 
@@ -826,7 +826,7 @@ export class ClaudianService implements ChatRuntime {
   private buildHistoryPathContext(vaultPath: string): ProviderHistoryPathContext {
     const customEnv = {
       ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
-      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId),
+      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings),
     };
     return {
       environment: { ...process.env, ...customEnv },

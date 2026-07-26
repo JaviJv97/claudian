@@ -40,6 +40,7 @@ export class CollaborationRoomRepository {
       version: 1,
       id: options.id,
       title: options.title,
+      status: 'active',
       createdAt: now,
       updatedAt: now,
       participants: options.participants.map(participant => ({ ...participant })),
@@ -59,6 +60,28 @@ export class CollaborationRoomRepository {
     } catch {
       return null;
     }
+  }
+
+  async list(): Promise<CollaborationRoom[]> {
+    const paths = await this.adapter.listFiles(ROOMS_PATH);
+    const rooms = await Promise.all(paths
+      .filter(candidate => candidate.endsWith('.json'))
+      .map(async (candidate) => {
+        try {
+          const parsed = JSON.parse(await this.adapter.read(candidate)) as CollaborationRoom;
+          return parsed.version === 1 && SAFE_ROOM_ID_PATTERN.test(parsed.id) ? parsed : null;
+        } catch {
+          return null;
+        }
+      }));
+    return rooms
+      .filter((room): room is CollaborationRoom => room !== null)
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+  }
+
+  async delete(id: string): Promise<void> {
+    assertRoomId(id);
+    await this.adapter.delete(this.getPath(id));
   }
 
   async appendEvent(roomId: string, event: CollaborationEvent): Promise<CollaborationRoom> {
@@ -84,6 +107,50 @@ export class CollaborationRoomRepository {
         throw new Error(`Collaboration participant not found: ${participantId}`);
       }
       participant.conversationId = conversationId;
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
+  async archive(roomId: string, now = Date.now()): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      room.status = 'archived';
+      room.archivedAt = now;
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
+  async reopen(roomId: string, now = Date.now()): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      room.status = 'active';
+      delete room.archivedAt;
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
+  async replaceParticipant(
+    roomId: string,
+    participantId: string,
+    replacement: CollaborationParticipant,
+    now = Date.now(),
+  ): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      const index = room.participants.findIndex(candidate => (
+        getCollaborationParticipantId(candidate) === participantId
+      ));
+      if (index < 0) {
+        throw new Error(`Collaboration participant not found: ${participantId}`);
+      }
+      const replacementId = getCollaborationParticipantId(replacement);
+      if (room.participants.some((candidate, candidateIndex) => (
+        candidateIndex !== index
+        && getCollaborationParticipantId(candidate) === replacementId
+      ))) {
+        throw new Error(`Collaboration participant already exists: ${replacementId}`);
+      }
+      room.participants[index] = { ...replacement };
       room.updatedAt = Math.max(room.updatedAt, now);
       return room;
     });

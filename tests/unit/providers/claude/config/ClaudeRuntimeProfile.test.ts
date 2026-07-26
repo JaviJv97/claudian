@@ -17,4 +17,30 @@ describe('resolveClaudeRuntimeProfileEnvironment', () => {
   it('does not invent an environment for unknown profiles', () => {
     expect(resolveClaudeRuntimeProfileEnvironment('unknown')).toEqual({});
   });
+
+  it('resolves a configured profile directory without reading credential files', () => {
+    expect(resolveClaudeRuntimeProfileEnvironment('work', {
+      providerConfigs: {
+        claude: {
+          collaborationProfiles: [
+            { id: 'work', label: 'Claude Work', configDir: '~/.claude-work', enabled: true },
+          ],
+        },
+      },
+    })).toEqual({
+      CLAUDE_CONFIG_DIR: path.join(os.homedir(), '.claude-work'),
+    });
+  });
+
+  it('does not resolve disabled configured profiles', () => {
+    expect(resolveClaudeRuntimeProfileEnvironment('work', {
+      providerConfigs: {
+        claude: {
+          collaborationProfiles: [
+            { id: 'work', label: 'Claude Work', configDir: '~/.claude-work', enabled: false },
+          ],
+        },
+      },
+    })).toEqual({});
+  });
 });

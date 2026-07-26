@@ -1,5 +1,8 @@
+import * as fs from 'node:fs';
+
 import { getProviderConfig } from '../../core/providers/providerConfig';
 import type { ProviderModule } from '../../core/providers/types';
+import { expandHomePath } from '../../utils/path';
 import {
   claudeWorkspaceRegistration,
   getClaudeWorkspaceServices,
@@ -27,6 +30,24 @@ export const claudeProviderRegistration: ProviderModule = {
   capabilities: CLAUDE_PROVIDER_CAPABILITIES,
   environmentKeyPatterns: [/^ANTHROPIC_/i, /^CLAUDE_/i],
   resolveRuntimeProfileEnvironment: resolveClaudeRuntimeProfileEnvironment,
+  getRuntimeProfiles: (settings) => getClaudeProviderSettings(settings).collaborationProfiles
+    .filter(profile => profile.enabled)
+    .map((profile) => {
+      const configDir = expandHomePath(profile.configDir);
+      const available = (() => {
+        try {
+          return fs.statSync(configDir).isDirectory();
+        } catch {
+          return false;
+        }
+      })();
+      return {
+        id: profile.id,
+        label: profile.label,
+        available,
+        unavailableReason: available ? undefined : `Directory not found: ${profile.configDir}`,
+      };
+    }),
   chatUIConfig: claudeChatUIConfig,
   settingsReconciler: claudeSettingsReconciler,
   settingsStorage: {

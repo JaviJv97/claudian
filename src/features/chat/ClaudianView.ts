@@ -32,6 +32,10 @@ import {
 } from './collaboration/collaborationFileConflicts';
 import { findCollaborationRebindCandidates } from './collaboration/collaborationRebinding';
 import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
+import {
+  chooseCollaborationParticipants,
+  toClaudeParticipantChoices,
+} from './collaboration/CollaborationRoomModal';
 import { groupCollaborationTabBarItems } from './collaboration/collaborationTabs';
 import { CollaborationTimeline } from './collaboration/CollaborationTimeline';
 import type { HistoryConversationStatus } from './controllers/ConversationController';
@@ -511,102 +515,288 @@ export class ClaudianView extends ItemView {
       return false;
     }
 
+    const choices = toClaudeParticipantChoices(
+      ProviderRegistry.getRuntimeProfiles('claude', this.plugin.settings),
+    );
+    choices.push({
+      id: 'codex',
+      providerId: 'codex',
+      label: 'Codex',
+      available: true,
+      selected: true,
+    });
+    const selection = await chooseCollaborationParticipants(this.app, choices);
+    if (!selection) return false;
+
     const maxTabs = Math.max(3, Math.min(10, this.plugin.settings.maxTabs ?? 3));
-    if (this.tabManager.getTabCount() + 3 > maxTabs) {
-      new Notice('A collaboration room needs three available tabs.');
+    if (this.tabManager.getTabCount() + selection.participants.length > maxTabs) {
+      new Notice(
+        `This room needs ${selection.participants.length} available tabs. `
+        + `Close a tab or raise the tab limit.`,
+      );
       return false;
     }
 
     const roomId = createCollaborationRoomId();
-    const claudePersonalConversation = await this.plugin.createConversation({
-      providerId: 'claude',
-      runtimeProfileId: 'personal',
-    });
-    const claudeCompanyConversation = await this.plugin.createConversation({
-      providerId: 'claude',
-      runtimeProfileId: 'company',
-    });
-    const codexConversation = await this.plugin.createConversation({ providerId: 'codex' });
-    const memberships = createCollaborationMemberships(roomId, {
-      'claude-personal': claudePersonalConversation.id,
-      'claude-company': claudeCompanyConversation.id,
-      codex: codexConversation.id,
-    });
-    await this.plugin.storage.rooms.create({
-      id: roomId,
-      title: 'Claude Personal + Claude Company + Codex',
-      participants: [
-        {
-          id: 'claude-personal',
-          providerId: 'claude',
-          label: 'Claude Personal',
-          runtimeProfileId: 'personal',
-          conversationId: claudePersonalConversation.id,
-        },
-        {
-          id: 'claude-company',
-          providerId: 'claude',
-          label: 'Claude Company',
-          runtimeProfileId: 'company',
-          conversationId: claudeCompanyConversation.id,
-        },
-        {
-          id: 'codex',
-          providerId: 'codex',
-          label: 'Codex',
-          conversationId: codexConversation.id,
-        },
-      ],
-    });
+    const createdConversationIds: string[] = [];
+    const createdTabIds: TabId[] = [];
+    let roomCreated = false;
+    try {
+      const conversations = await Promise.all(selection.participants.map(async (participant) => {
+        const conversation = await this.plugin.createConversation({
+          providerId: participant.providerId,
+          runtimeProfileId: participant.runtimeProfileId,
+        });
+        createdConversationIds.push(conversation.id);
+        return { participant, conversation };
+      }));
+      const conversationIds = Object.fromEntries(
+        conversations.map(({ participant, conversation }) => [participant.id, conversation.id]),
+      );
+      const memberships = createCollaborationMemberships(roomId, conversationIds);
+      await this.plugin.storage.rooms.create({
+        id: roomId,
+        title: selection.title,
+        participants: conversations.map(({ participant, conversation }) => ({
+          id: participant.id,
+          providerId: participant.providerId,
+          label: participant.label,
+          runtimeProfileId: participant.runtimeProfileId,
+          conversationId: conversation.id,
+        })),
+      });
+      roomCreated = true;
 
-    await Promise.all([
-      this.plugin.updateConversation(claudePersonalConversation.id, {
-        title: 'Collaboration · Claude Personal',
-        collaboration: memberships['claude-personal'],
-      }),
-      this.plugin.updateConversation(claudeCompanyConversation.id, {
-        title: 'Collaboration · Claude Company',
-        collaboration: memberships['claude-company'],
-      }),
-      this.plugin.updateConversation(codexConversation.id, {
-        title: 'Collaboration · Codex',
-        collaboration: memberships.codex,
-      }),
-    ]);
+      await Promise.all(conversations.map(({ participant, conversation }) => (
+        this.plugin.updateConversation(conversation.id, {
+          title: `Collaboration · ${participant.label}`,
+          collaboration: memberships[participant.id],
+        })
+      )));
 
-    const claudePersonalTab = await this.tabManager.createTab(
-      claudePersonalConversation.id,
-      undefined,
-      { activate: false },
-    );
-    const claudeCompanyTab = await this.tabManager.createTab(
-      claudeCompanyConversation.id,
-      undefined,
-      { activate: false },
-    );
-    const codexTab = await this.tabManager.createTab(
-      codexConversation.id,
-      undefined,
-      { activate: true },
-    );
+      for (const [index, { conversation }] of conversations.entries()) {
+        const tab = await this.tabManager.createTab(conversation.id, undefined, {
+          activate: index === conversations.length - 1,
+        });
+        if (!tab) throw new Error('Could not open all collaboration participants.');
+        createdTabIds.push(tab.id);
+      }
 
-    if (!claudePersonalTab || !claudeCompanyTab || !codexTab) {
-      if (claudePersonalTab) await this.tabManager.closeTab(claudePersonalTab.id, true);
-      if (claudeCompanyTab) await this.tabManager.closeTab(claudeCompanyTab.id, true);
-      if (codexTab) await this.tabManager.closeTab(codexTab.id, true);
-      await Promise.all([
-        this.plugin.deleteConversation(claudePersonalConversation.id),
-        this.plugin.deleteConversation(claudeCompanyConversation.id),
-        this.plugin.deleteConversation(codexConversation.id),
-      ]);
-      new Notice('Could not open all collaboration participants.');
+      this.updateTabBarVisibility();
+      await this.reconcileCollaborationTimelines();
+      new Notice(`${selection.title} room created.`);
+      return true;
+    } catch (error) {
+      for (const tabId of createdTabIds) {
+        try {
+          await this.tabManager.closeTab(tabId, true);
+        } catch {
+          // Continue rollback so one failed tab close does not strand other records.
+        }
+      }
+      if (roomCreated) {
+        try {
+          await this.plugin.storage.rooms.delete(roomId);
+        } catch {
+          // Conversation cleanup still has value if room cleanup fails.
+        }
+      }
+      await Promise.allSettled(
+        createdConversationIds.map(id => this.plugin.deleteConversation(id)),
+      );
+      const message = error instanceof Error ? error.message : 'Could not create collaboration.';
+      new Notice(message);
+      return false;
+    }
+  }
+
+  async archiveCurrentCollaboration(): Promise<boolean> {
+    const activeTab = this.tabManager?.getActiveTab();
+    const conversation = activeTab?.conversationId
+      ? this.plugin.getConversationSync(activeTab.conversationId)
+      : null;
+    const roomId = conversation?.collaboration?.roomId;
+    if (!roomId || !this.tabManager) {
+      new Notice('The active tab is not part of a collaboration room.');
+      return false;
+    }
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room) {
+      new Notice('Collaboration room not found.');
+      return false;
+    }
+    await this.plugin.storage.rooms.archive(roomId);
+    const conversationIds = new Set(
+      room.participants.map(participant => participant.conversationId),
+    );
+    for (const tab of [...this.tabManager.getAllTabs()]) {
+      if (tab.conversationId && conversationIds.has(tab.conversationId)) {
+        await this.tabManager.closeTab(tab.id, true);
+      }
+    }
+    this.updateTabBarVisibility();
+    new Notice(`${room.title} archived.`);
+    return true;
+  }
+
+  async reopenLatestCollaboration(): Promise<boolean> {
+    if (!this.tabManager) return false;
+    const room = (await this.plugin.storage.rooms.list())
+      .find(candidate => candidate.status === 'archived');
+    if (!room) {
+      new Notice('No archived collaboration rooms found.');
+      return false;
+    }
+    const maxTabs = Math.max(3, Math.min(10, this.plugin.settings.maxTabs ?? 3));
+    if (this.tabManager.getTabCount() + room.participants.length > maxTabs) {
+      new Notice(
+        `Reopening ${room.title} needs ${room.participants.length} available tabs.`,
+      );
+      return false;
+    }
+    const openedTabs: TabId[] = [];
+    try {
+      for (const [index, participant] of room.participants.entries()) {
+        const tab = await this.tabManager.createTab(participant.conversationId, undefined, {
+          activate: index === room.participants.length - 1,
+        });
+        if (!tab) throw new Error('Could not reopen every collaboration participant.');
+        openedTabs.push(tab.id);
+      }
+      await this.plugin.storage.rooms.reopen(room.id);
+      this.updateTabBarVisibility();
+      await this.reconcileCollaborationTimelines();
+      new Notice(`${room.title} reopened.`);
+      return true;
+    } catch (error) {
+      for (const tabId of openedTabs) {
+        try {
+          await this.tabManager.closeTab(tabId, true);
+        } catch {
+          // Continue rolling back the remaining tabs.
+        }
+      }
+      new Notice(error instanceof Error ? error.message : 'Could not reopen collaboration.');
+      return false;
+    }
+  }
+
+  async replaceCurrentCollaborationParticipant(): Promise<boolean> {
+    if (!this.tabManager) return false;
+    const activeTab = this.tabManager.getActiveTab();
+    const currentConversation = activeTab?.conversationId
+      ? this.plugin.getConversationSync(activeTab.conversationId)
+      : null;
+    const membership = currentConversation?.collaboration;
+    if (!activeTab || !currentConversation || !membership) {
+      new Notice('The active tab is not a collaboration participant.');
+      return false;
+    }
+    const room = await this.plugin.storage.rooms.get(membership.roomId);
+    const currentParticipant = room?.participants.find(participant => (
+      getCollaborationParticipantId(participant) === membership.participantId
+    ));
+    if (!room || !currentParticipant) {
+      new Notice('Collaboration participant not found.');
       return false;
     }
 
-    this.updateTabBarVisibility();
-    await this.reconcileCollaborationTimelines();
-    new Notice('Claude personal + Claude company + Codex room created.');
-    return true;
+    const choices = toClaudeParticipantChoices(
+      ProviderRegistry.getRuntimeProfiles('claude', this.plugin.settings),
+    );
+    if (ProviderRegistry.isEnabled('codex', this.plugin.settings)) {
+      choices.push({
+        id: 'codex',
+        providerId: 'codex',
+        label: 'Codex',
+        available: true,
+        selected: false,
+      });
+    }
+    const existingIds = new Set(room.participants.map(getCollaborationParticipantId));
+    const candidates = choices
+      .filter(choice => !existingIds.has(choice.id))
+      .map(choice => ({ ...choice, selected: false }));
+    if (candidates.length === 0) {
+      new Notice('No unused collaboration profiles are available.');
+      return false;
+    }
+    const selection = await chooseCollaborationParticipants(this.app, candidates, {
+      title: 'Replace participant',
+      help: `Choose one participant to replace ${currentParticipant.label ?? membership.participantId}.`,
+      submitLabel: 'Replace participant',
+      minimum: 1,
+      maximum: 1,
+    });
+    const replacementChoice = selection?.participants[0];
+    if (!replacementChoice) return false;
+
+    const replacementConversation = await this.plugin.createConversation({
+      providerId: replacementChoice.providerId,
+      runtimeProfileId: replacementChoice.runtimeProfileId,
+    });
+    const replacement = {
+      id: replacementChoice.id,
+      providerId: replacementChoice.providerId,
+      label: replacementChoice.label,
+      runtimeProfileId: replacementChoice.runtimeProfileId,
+      conversationId: replacementConversation.id,
+    };
+    const nextConversationIds = { ...membership.conversationIds };
+    delete nextConversationIds[membership.participantId];
+    nextConversationIds[replacementChoice.id] = replacementConversation.id;
+
+    try {
+      await this.plugin.updateConversation(replacementConversation.id, {
+        title: `Collaboration · ${replacementChoice.label}`,
+        collaboration: {
+          roomId: room.id,
+          participantId: replacementChoice.id,
+          conversationIds: nextConversationIds,
+        },
+      });
+      await Promise.all(room.participants
+        .filter(participant => getCollaborationParticipantId(participant) !== membership.participantId)
+        .map(participant => this.plugin.updateConversation(participant.conversationId, {
+          collaboration: {
+            roomId: room.id,
+            participantId: getCollaborationParticipantId(participant),
+            conversationIds: nextConversationIds,
+          },
+        })));
+      await this.plugin.storage.rooms.replaceParticipant(
+        room.id,
+        membership.participantId,
+        replacement,
+      );
+      await this.tabManager.closeTab(activeTab.id, true);
+      const replacementTab = await this.tabManager.createTab(
+        replacementConversation.id,
+        undefined,
+        { activate: true },
+      );
+      if (!replacementTab) throw new Error('Could not open the replacement participant.');
+      this.updateTabBarVisibility();
+      await this.reconcileCollaborationTimelines();
+      new Notice(`${replacementChoice.label} joined ${room.title}.`);
+      return true;
+    } catch (error) {
+      try {
+        await this.plugin.storage.rooms.replaceParticipant(
+          room.id,
+          replacementChoice.id,
+          currentParticipant,
+        );
+      } catch {
+        // The repository may not have reached the replacement step.
+      }
+      await this.plugin.deleteConversation(replacementConversation.id);
+      if (!this.tabManager.getAllTabs().some(tab => tab.conversationId === currentConversation.id)) {
+        await this.tabManager.createTab(currentConversation.id, undefined, { activate: true });
+      }
+      new Notice(error instanceof Error ? error.message : 'Could not replace participant.');
+      return false;
+    }
   }
 
   async routeCollaborationMessage(

@@ -239,10 +239,35 @@ export default class ClaudianPlugin extends Plugin {
 
       this.addCommand({
         id: 'start-claude-codex-collaboration',
-        name: 'Start Claude personal + Claude company + Codex collaboration',
+        name: 'Start collaboration room',
         callback: async () => {
           const view = await this.ensureViewOpen();
           await view?.startClaudeCodexCollaboration();
+        },
+      });
+
+      this.addCommand({
+        id: 'archive-current-collaboration',
+        name: 'Archive current collaboration room',
+        callback: async () => {
+          await this.getView()?.archiveCurrentCollaboration();
+        },
+      });
+
+      this.addCommand({
+        id: 'reopen-latest-collaboration',
+        name: 'Reopen latest archived collaboration room',
+        callback: async () => {
+          const view = await this.ensureViewOpen();
+          await view?.reopenLatestCollaboration();
+        },
+      });
+
+      this.addCommand({
+        id: 'replace-current-collaboration-participant',
+        name: 'Replace current collaboration participant',
+        callback: async () => {
+          await this.getView()?.replaceCurrentCollaborationParticipant();
         },
       });
 

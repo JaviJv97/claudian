@@ -403,6 +403,7 @@ export class ConversationRepository {
         ...ProviderRegistry.resolveRuntimeProfileEnvironment(
           conversation.providerId,
           conversation.runtimeProfileId,
+          settings,
         ),
       },
       hostPlatform: process.platform,

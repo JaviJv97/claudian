@@ -11,6 +11,7 @@ import {
   type ProviderConversationHistoryService,
   type ProviderId,
   type ProviderRegistration,
+  type ProviderRuntimeProfile,
   type ProviderSettingsReconciler,
   type ProviderSettingsStorageAdapter,
   type ProviderSubagentAdapter,
@@ -109,9 +110,17 @@ export class ProviderRegistry {
   static resolveRuntimeProfileEnvironment(
     providerId: ProviderId,
     profileId?: string,
+    settings?: Record<string, unknown>,
   ): Record<string, string> {
     return this.getProviderRegistration(providerId)
-      .resolveRuntimeProfileEnvironment?.(profileId) ?? {};
+      .resolveRuntimeProfileEnvironment?.(profileId, settings) ?? {};
+  }
+
+  static getRuntimeProfiles(
+    providerId: ProviderId,
+    settings: Record<string, unknown>,
+  ): ProviderRuntimeProfile[] {
+    return this.getProviderRegistration(providerId).getRuntimeProfiles?.(settings) ?? [];
   }
 
   static getChatUIConfig(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): ProviderChatUIConfig {

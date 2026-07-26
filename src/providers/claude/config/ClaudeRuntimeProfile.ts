@@ -1,14 +1,20 @@
 import * as os from 'os';
 import * as path from 'path';
 
-export const CLAUDE_RUNTIME_PROFILE_IDS = ['personal', 'company'] as const;
-export type ClaudeRuntimeProfileId = typeof CLAUDE_RUNTIME_PROFILE_IDS[number];
+import { expandHomePath } from '../../../utils/path';
+import { getClaudeProviderSettings } from '../settings';
 
 export function resolveClaudeRuntimeProfileEnvironment(
   profileId?: string,
+  settings?: Record<string, unknown>,
 ): Record<string, string> {
-  if (profileId !== 'company') return {};
+  if (!profileId) return {};
+  const profile = getClaudeProviderSettings(settings ?? {}).collaborationProfiles
+    .find(candidate => candidate.id === profileId && candidate.enabled);
+  if (!profile) return {};
+  const configDir = expandHomePath(profile.configDir);
+  if (path.resolve(configDir) === path.resolve(os.homedir(), '.claude')) return {};
   return {
-    CLAUDE_CONFIG_DIR: path.join(os.homedir(), '.claude-company'),
+    CLAUDE_CONFIG_DIR: configDir,
   };
 }

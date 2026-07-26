@@ -15,6 +15,16 @@ export interface CollaborationRoomStorage {
     now?: number;
   }): Promise<CollaborationRoom>;
   get(id: string): Promise<CollaborationRoom | null>;
+  list(): Promise<CollaborationRoom[]>;
+  delete(id: string): Promise<void>;
+  archive(roomId: string, now?: number): Promise<CollaborationRoom>;
+  reopen(roomId: string, now?: number): Promise<CollaborationRoom>;
+  replaceParticipant(
+    roomId: string,
+    participantId: string,
+    replacement: CollaborationParticipant,
+    now?: number,
+  ): Promise<CollaborationRoom>;
   updateParticipantConversation(
     roomId: string,
     participantId: string,
