@@ -1,5 +1,29 @@
 import type { AppSessionStorage, AppTabManagerState } from '../providers/types';
 import type { VaultFileAdapter } from '../storage/VaultFileAdapter';
+import type {
+  CollaborationDelivery,
+  CollaborationEvent,
+  CollaborationParticipant,
+  CollaborationRoom,
+  ProviderId,
+} from '../types';
+
+export interface CollaborationRoomStorage {
+  create(options: {
+    id: string;
+    title: string;
+    participants: CollaborationParticipant[];
+    now?: number;
+  }): Promise<CollaborationRoom>;
+  get(id: string): Promise<CollaborationRoom | null>;
+  appendEvent(roomId: string, event: CollaborationEvent): Promise<CollaborationRoom>;
+  updateDelivery(
+    roomId: string,
+    eventId: string,
+    providerId: ProviderId,
+    delivery: CollaborationDelivery,
+  ): Promise<CollaborationRoom>;
+}
 
 /**
  * Minimal shared app storage contract.
@@ -16,5 +40,6 @@ export interface SharedAppStorage {
   setTabManagerState(state: AppTabManagerState): Promise<void>;
   getTabManagerState(): Promise<AppTabManagerState | null>;
   sessions: AppSessionStorage;
+  rooms: CollaborationRoomStorage;
   getAdapter(): VaultFileAdapter;
 }

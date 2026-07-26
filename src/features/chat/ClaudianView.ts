@@ -1,6 +1,7 @@
 import type { EventRef, WorkspaceLeaf } from 'obsidian';
 import { ItemView, Notice, Scope, setIcon } from 'obsidian';
 
+import { CollaborationCoordinator } from '../../core/collaboration/CollaborationCoordinator';
 import {
   createCollaborationMemberships,
   createCollaborationRoomId,
@@ -15,6 +16,7 @@ import {
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
+import type { ImageAttachment } from '../../core/types';
 import { VIEW_TYPE_CLAUDIAN } from '../../core/types';
 import {
   cancelScheduledAnimationFrame,
@@ -22,6 +24,7 @@ import {
   type ScheduledAnimationFrame,
 } from '../../utils/animationFrame';
 import type { FeatureHost } from '../FeatureHost';
+import { CollaborationTimeline } from './collaboration/CollaborationTimeline';
 import type { HistoryConversationStatus } from './controllers/ConversationController';
 import { MentionCacheCoordinator } from './services/MentionCacheCoordinator';
 import { TabStatePersistenceCoordinator } from './services/TabStatePersistenceCoordinator';
@@ -32,7 +35,7 @@ import {
 } from './tabs/Tab';
 import { TabBar } from './tabs/TabBar';
 import { TabManager } from './tabs/TabManager';
-import type { TabData, TabId } from './tabs/types';
+import type { TabBarItem, TabData, TabId } from './tabs/types';
 import { recalculateUsageForModel } from './utils/usageInfo';
 
 type LoadableView = {
@@ -70,6 +73,8 @@ export class ClaudianView extends ItemView {
   private pendingTabBarUpdate: ScheduledAnimationFrame | null = null;
 
   private tabStatePersistence: TabStatePersistenceCoordinator;
+  private collaborationCoordinator: CollaborationCoordinator;
+  private collaborationTimelines = new Map<TabId, CollaborationTimeline>();
 
   constructor(leaf: WorkspaceLeaf, plugin: FeatureHost) {
     super(leaf);
@@ -77,6 +82,10 @@ export class ClaudianView extends ItemView {
     this.tabStatePersistence = new TabStatePersistenceCoordinator(
       state => this.plugin.persistTabManagerState(state),
     );
+    this.collaborationCoordinator = new CollaborationCoordinator({
+      storage: this.plugin.storage.rooms,
+      onDeliveryChanged: () => this.refreshAllCollaborationTimelines(),
+    });
 
     // Hover Editor compatibility: Define load as an instance method that can't be
     // overwritten by prototype patching. Hover Editor patches ClaudianView.prototype.load
@@ -234,6 +243,7 @@ export class ClaudianView extends ItemView {
           this.updateHistoryDropdown();
           this.updateInputLocation();
           this.syncProviderBrandColor();
+          void this.reconcileCollaborationTimelines();
         },
         onActiveTabChanged: () => {
           this.updateTabBar();
@@ -247,7 +257,9 @@ export class ClaudianView extends ItemView {
           this.updateInputLocation();
           this.syncProviderBrandColor();
         },
-        onTabClosed: () => {
+        onTabClosed: (tabId) => {
+          this.collaborationTimelines.get(tabId)?.destroy();
+          this.collaborationTimelines.delete(tabId);
           this.updateTabBar();
           this.updateHistoryDropdown();
           this.updateInputLocation();
@@ -263,6 +275,7 @@ export class ClaudianView extends ItemView {
           this.updateTabBar();
           this.updateHistoryDropdown();
           this.syncProviderBrandColor();
+          void this.reconcileCollaborationTimelines();
         },
         onTabProviderChanged: () => {
           this.updateTabBar();
@@ -278,6 +291,7 @@ export class ClaudianView extends ItemView {
 
     this.wireEventHandlers();
     await this.restoreOrCreateTabs();
+    await this.reconcileCollaborationTimelines();
     this.syncProviderBrandColor();
     this.attachNavRowContentToInputFooter();
     this.updateInputLocation();
@@ -295,6 +309,8 @@ export class ClaudianView extends ItemView {
       this.plugin.app.vault.offref(ref);
     }
     this.eventRefs = [];
+    for (const timeline of this.collaborationTimelines?.values() ?? []) timeline.destroy();
+    this.collaborationTimelines?.clear();
 
     try {
       await this.persistTabStateImmediate();
@@ -494,6 +510,14 @@ export class ClaudianView extends ItemView {
       claude: claudeConversation.id,
       codex: codexConversation.id,
     });
+    await this.plugin.storage.rooms.create({
+      id: roomId,
+      title: 'Claude + Codex',
+      participants: [
+        { providerId: 'claude', conversationId: claudeConversation.id },
+        { providerId: 'codex', conversationId: codexConversation.id },
+      ],
+    });
 
     await Promise.all([
       this.plugin.updateConversation(claudeConversation.id, {
@@ -529,11 +553,16 @@ export class ClaudianView extends ItemView {
     }
 
     this.updateTabBarVisibility();
+    await this.reconcileCollaborationTimelines();
     new Notice('Claude + Codex collaboration room created.');
     return true;
   }
 
-  async routeCollaborationMessage(originTabId: TabId, content: string): Promise<boolean> {
+  async routeCollaborationMessage(
+    originTabId: TabId,
+    content: string,
+    images?: ImageAttachment[],
+  ): Promise<boolean> {
     const originTab = this.tabManager?.getTab(originTabId);
     const originConversation = originTab?.conversationId
       ? this.plugin.getConversationSync(originTab.conversationId)
@@ -541,38 +570,157 @@ export class ClaudianView extends ItemView {
     const membership = originConversation?.collaboration;
     if (!originTab || !membership || !this.tabManager) return false;
 
-    const participantIds = Object.keys(membership.conversationIds);
-    const recipientIds = resolveCollaborationRecipients(content, participantIds);
-    const tabsByConversationId = new Map(
-      this.tabManager
-        .getAllTabs()
-        .filter(tab => tab.conversationId !== null)
-        .map(tab => [tab.conversationId as string, tab]),
-    );
-
-    const recipientTabs = recipientIds.map((participantId) => {
-      const conversationId = membership.conversationIds[participantId];
-      return conversationId ? tabsByConversationId.get(conversationId) ?? null : null;
-    });
-    if (recipientTabs.some(tab => tab === null)) {
-      new Notice('Open every collaboration participant before sending to the room.');
+    const room = await this.plugin.storage.rooms.get(membership.roomId);
+    if (!room) {
+      new Notice('This collaboration room could not be loaded.');
       return true;
     }
 
-    const includesOrigin = recipientTabs.some(tab => tab?.id === originTabId);
-    for (const tab of recipientTabs) {
-      if (!tab || tab.id === originTabId) continue;
-      void tab.controllers.inputController?.sendMessage({
-        content,
-        editorContextOverride: null,
-        browserContextOverride: null,
-        canvasContextOverride: null,
-        skipCollaborationRouting: true,
-      }).catch(() => new Notice(`Failed to send collaboration turn to ${tab.providerId}.`));
+    const recipientIds = resolveCollaborationRecipients(
+      content,
+      room.participants.map(participant => participant.providerId),
+    );
+    const turn = await this.collaborationCoordinator.send(room, {
+      content,
+      recipientIds,
+      attachments: images,
+      dispatch: async (participant, request, signal) => {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+        const tab = this.tabManager?.getAllTabs().find(candidate => (
+          candidate.conversationId === participant.conversationId
+        ));
+        const inputController = tab?.controllers.inputController;
+        if (!tab || !inputController) {
+          throw new Error(`${participant.providerId} participant is not open`);
+        }
+
+        const cancel = () => inputController.cancelStreaming();
+        signal.addEventListener('abort', cancel, { once: true });
+        try {
+          await inputController.sendMessage({
+            content: request.content,
+            images,
+            editorContextOverride: null,
+            browserContextOverride: null,
+            canvasContextOverride: null,
+            skipCollaborationRouting: true,
+          });
+        } finally {
+          signal.removeEventListener('abort', cancel);
+        }
+
+        const assistantMessage = [...tab.state.messages]
+          .reverse()
+          .find(message => message.role === 'assistant' && message.content.trim());
+        if (assistantMessage) {
+          await this.plugin.storage.rooms.appendEvent(room.id, {
+            id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            kind: 'message',
+            authorId: participant.providerId,
+            recipientIds: ['user'],
+            content: assistantMessage.content,
+            createdAt: assistantMessage.timestamp,
+            delivery: {},
+            sourceMessageId: assistantMessage.id,
+          });
+          this.refreshCollaborationTimelines(room.id);
+        }
+        if (assistantMessage?.isInterrupt) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+        return { providerMessageId: assistantMessage?.assistantMessageId };
+      },
+    });
+    void turn.completion.catch(() => {
+      new Notice('One or more collaboration participants failed.');
+    });
+    return true;
+  }
+
+  private async reconcileCollaborationTimelines(): Promise<void> {
+    // Some lightweight test hosts construct the view without running field initializers.
+    if (!this.collaborationTimelines) return;
+    const tabs = this.tabManager?.getAllTabs() ?? [];
+    const liveTabIds = new Set(tabs.map(tab => tab.id));
+    for (const [tabId, timeline] of this.collaborationTimelines) {
+      const tab = tabs.find(candidate => candidate.id === tabId);
+      const conversation = tab?.conversationId
+        ? this.plugin.getConversationSync(tab.conversationId)
+        : null;
+      if (!liveTabIds.has(tabId) || !conversation?.collaboration) {
+        timeline.destroy();
+        this.collaborationTimelines.delete(tabId);
+      }
     }
 
-    // Let the origin controller perform its normal send when it is a recipient.
-    return !includesOrigin;
+    const tabsByRoom = new Map<string, TabData[]>();
+    for (const tab of tabs) {
+      if (!tab.conversationId) continue;
+      const membership = this.plugin.getConversationSync(tab.conversationId)?.collaboration;
+      if (!membership) continue;
+      const roomTabs = tabsByRoom.get(membership.roomId) ?? [];
+      roomTabs.push(tab);
+      tabsByRoom.set(membership.roomId, roomTabs);
+    }
+
+    for (const [roomId, roomTabs] of tabsByRoom) {
+      if (roomTabs.length < 2) continue;
+      const existingRoom = await this.plugin.storage.rooms.get(roomId);
+      if (!existingRoom) {
+        const membership = roomTabs
+          .map(tab => (
+            tab.conversationId
+              ? this.plugin.getConversationSync(tab.conversationId)?.collaboration
+              : null
+          ))
+          .find(candidate => candidate?.roomId === roomId);
+        if (!membership) continue;
+        await this.plugin.storage.rooms.create({
+          id: roomId,
+          title: 'Claude + Codex',
+          participants: Object.entries(membership.conversationIds).map(
+            ([providerId, conversationId]) => ({ providerId, conversationId }),
+          ),
+        });
+      }
+      for (const tab of roomTabs) {
+        if (this.collaborationTimelines.has(tab.id)) continue;
+        this.collaborationTimelines.set(tab.id, new CollaborationTimeline({
+          component: this,
+          hostTab: tab,
+          participantTabs: roomTabs,
+          plugin: this.plugin,
+          roomId,
+          onRetry: async (providerId, content) => {
+            await this.routeCollaborationMessage(tab.id, `@${providerId} ${content}`);
+          },
+          onReview: async (reviewerId, sourceProviderId, content) => {
+            const sourceLabel = ProviderRegistry.getProviderDisplayName(sourceProviderId);
+            await this.routeCollaborationMessage(
+              tab.id,
+              `@${reviewerId} Review this response from ${sourceLabel}. Identify errors, omissions, and concrete improvements.\n\n${content}`,
+            );
+          },
+        }));
+      }
+    }
+  }
+
+  private refreshCollaborationTimelines(roomId: string): void {
+    if (!this.collaborationTimelines) return;
+    for (const tab of this.tabManager?.getAllTabs() ?? []) {
+      if (!tab.conversationId) continue;
+      const membership = this.plugin.getConversationSync(tab.conversationId)?.collaboration;
+      if (membership?.roomId === roomId) {
+        this.collaborationTimelines.get(tab.id)?.refresh();
+      }
+    }
+  }
+
+  private refreshAllCollaborationTimelines(): void {
+    for (const timeline of this.collaborationTimelines?.values() ?? []) timeline.refresh();
   }
 
   private updateTabBar(): void {
@@ -587,7 +735,7 @@ export class ClaudianView extends ItemView {
       this.pendingTabBarUpdate = null;
       if (!this.tabManager || !this.tabBar) return;
 
-      const items = this.tabManager.getTabBarItems();
+      const items = this.getVisibleTabBarItems();
       this.tabBar.update(items);
       this.updateTabBarVisibility();
     }, this.containerEl.ownerDocument.defaultView ?? null);
@@ -596,12 +744,50 @@ export class ClaudianView extends ItemView {
   private updateTabBarVisibility(): void {
     if (!this.tabBarContainerEl || !this.tabManager) return;
 
-    const tabCount = this.tabManager.getTabCount();
+    const tabCount = this.getVisibleTabBarItems().length;
     const showTabBar = tabCount >= 2;
 
     this.tabBarContainerEl.toggleClass('claudian-hidden', !showTabBar);
 
     this.updateNewTabButtonVisibility();
+  }
+
+  private getVisibleTabBarItems(): TabBarItem[] {
+    if (!this.tabManager) return [];
+    if (typeof this.tabManager.getTabBarItems !== 'function') return [];
+    const items = this.tabManager.getTabBarItems();
+    const grouped = new Map<string, TabBarItem>();
+    const visible: TabBarItem[] = [];
+
+    for (const item of items) {
+      const tab = this.tabManager.getTab(item.id);
+      const membership = tab?.conversationId
+        ? this.plugin.getConversationSync(tab.conversationId)?.collaboration
+        : null;
+      if (!membership) {
+        visible.push(item);
+        continue;
+      }
+
+      const existing = grouped.get(membership.roomId);
+      if (existing) {
+        existing.isActive = existing.isActive || item.isActive;
+        existing.isStreaming = existing.isStreaming || item.isStreaming;
+        existing.needsAttention = existing.needsAttention || item.needsAttention;
+        continue;
+      }
+
+      const roomItem: TabBarItem = {
+        ...item,
+        title: 'Claude + Codex',
+        providerId: 'collaboration',
+        canClose: false,
+      };
+      grouped.set(membership.roomId, roomItem);
+      visible.push(roomItem);
+    }
+
+    return visible.map((item, index) => ({ ...item, index: index + 1 }));
   }
 
   private updateNewTabButtonVisibility(): void {

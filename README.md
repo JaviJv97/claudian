@@ -14,9 +14,10 @@ An Obsidian plugin that embeds AI coding agents (Claude Code, Codex, Grok, Openc
 > palette to create linked Claude and Codex sessions. Messages sent from either
 > linked tab go to both agents by default. Prefix a message with `@claude` or
 > `@codex` to address one participant, or use `@all` explicitly. Collaboration
-> membership is stored with the session metadata so the link survives restart.
-> Text routing is implemented in this first slice; attachments and a unified
-> transcript view are planned next.
+> membership and its shared event log are stored in the vault so the room
+> survives restart. The room presents one attributed timeline with live agent
+> output, image attachments, independent delivery states and stop/retry
+> controls. Any agent response can be handed to the other agent for review.
 
 ## Features & Usage
 

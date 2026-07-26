@@ -5,6 +5,7 @@ import type { ProviderCommandDiscoveryController } from '../../../core/providers
 import type { ProviderCommandEntry } from '../../../core/providers/commands/ProviderCommandEntry';
 import type { InstructionRefineService, ProviderId, TitleGenerationService } from '../../../core/providers/types';
 import type { ChatRuntime } from '../../../core/runtime/ChatRuntime';
+import type { ImageAttachment } from '../../../core/types';
 import type { SlashCommandDropdown } from '../../../shared/components/SlashCommandDropdown';
 import type { BrowserSelectionController } from '../controllers/BrowserSelectionController';
 import type { CanvasSelectionController } from '../controllers/CanvasSelectionController';
@@ -73,7 +74,11 @@ export interface TabManagerViewHost extends Component {
   getSharedSelectionFocusScopeEls?(): HTMLElement[];
 
   /** Routes a user turn across a linked multi-provider collaboration room. */
-  routeCollaborationMessage?(originTabId: TabId, content: string): Promise<boolean>;
+  routeCollaborationMessage?(
+    originTabId: TabId,
+    content: string,
+    images?: ImageAttachment[],
+  ): Promise<boolean>;
 }
 
 /**

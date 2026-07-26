@@ -1,4 +1,4 @@
-import type { CollaborationMembership } from '../collaboration/collaborationRoom';
+import type { CollaborationMembership } from './collaboration';
 import type { SDKToolUseResult } from './diff';
 import type { ProviderId } from './provider';
 import type { SubagentMode, ToolCallInfo, ToolProviderPayload } from './tools';

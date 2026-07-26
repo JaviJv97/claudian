@@ -48,6 +48,7 @@ function createInitialState(): ChatStateData {
 export class ChatState {
   private state: ChatStateData;
   private _callbacks: ChatStateCallbacks;
+  private listeners = new Set<ChatStateCallbacks>();
   private thinkingIndicatorTimeoutWindow: Window | null = null;
   private flavorTimerIntervalWindow: Window | null = null;
 
@@ -64,6 +65,16 @@ export class ChatState {
     this._callbacks = value;
   }
 
+  subscribe(callbacks: ChatStateCallbacks): () => void {
+    this.listeners.add(callbacks);
+    return () => this.listeners.delete(callbacks);
+  }
+
+  notifyMessagesChanged(): void {
+    this._callbacks.onMessagesChanged?.();
+    for (const listener of this.listeners) listener.onMessagesChanged?.();
+  }
+
   // ============================================
   // Messages
   // ============================================
@@ -74,17 +85,17 @@ export class ChatState {
 
   set messages(value: ChatMessage[]) {
     this.state.messages = value;
-    this._callbacks.onMessagesChanged?.();
+    this.notifyMessagesChanged();
   }
 
   addMessage(msg: ChatMessage): void {
     this.state.messages.push(msg);
-    this._callbacks.onMessagesChanged?.();
+    this.notifyMessagesChanged();
   }
 
   clearMessages(): void {
     this.state.messages = [];
-    this._callbacks.onMessagesChanged?.();
+    this.notifyMessagesChanged();
   }
 
   truncateAt(messageId: string): number {
@@ -92,7 +103,7 @@ export class ChatState {
     if (idx === -1) return 0;
     const removed = this.state.messages.length - idx;
     this.state.messages = this.state.messages.slice(0, idx);
-    this._callbacks.onMessagesChanged?.();
+    this.notifyMessagesChanged();
     return removed;
   }
 
@@ -107,6 +118,7 @@ export class ChatState {
   set isStreaming(value: boolean) {
     this.state.isStreaming = value;
     this._callbacks.onStreamingStateChanged?.(value);
+    for (const listener of this.listeners) listener.onStreamingStateChanged?.(value);
   }
 
   get cancelRequested(): boolean {
@@ -308,6 +320,7 @@ export class ChatState {
   set needsAttention(value: boolean) {
     this.state.needsAttention = value;
     this._callbacks.onAttentionChanged?.(value);
+    for (const listener of this.listeners) listener.onAttentionChanged?.(value);
   }
 
   // ============================================

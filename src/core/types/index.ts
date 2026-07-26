@@ -12,6 +12,17 @@ export {
   type UsageInfo,
   VIEW_TYPE_CLAUDIAN,
 } from './chat';
+export {
+  type CollaborationAttachment,
+  type CollaborationAuthorId,
+  type CollaborationDelivery,
+  type CollaborationDeliveryStatus,
+  type CollaborationEvent,
+  type CollaborationMembership,
+  type CollaborationParticipant,
+  type CollaborationRecipientId,
+  type CollaborationRoom,
+} from './collaboration';
 export { type ProviderId } from './provider';
 
 // Settings and command types

@@ -367,10 +367,37 @@ describe('InputController - Collaboration routing', () => {
 
     await new InputController(deps).sendMessage();
 
-    expect(routeCollaborationMessage).toHaveBeenCalledWith('@all compare these approaches');
+    expect(routeCollaborationMessage).toHaveBeenCalledWith(
+      '@all compare these approaches',
+      undefined,
+    );
     expect(deps.mockAgentService.query).not.toHaveBeenCalled();
     expect(inputEl.value).toBe('');
     expect(deps.resetInputHeight).toHaveBeenCalled();
+  });
+
+  it('routes and clears image attachments with the shared turn', async () => {
+    const routeCollaborationMessage = jest.fn().mockResolvedValue(true);
+    const deps = createSendableDeps({ routeCollaborationMessage });
+    const inputEl = deps.getInputEl();
+    const imageContextManager = deps.getImageContextManager()!;
+    const image = {
+      id: 'image-1',
+      name: 'diagram.png',
+      mediaType: 'image/png',
+      data: 'aW1hZ2U=',
+      size: 5,
+      source: 'paste',
+    };
+    inputEl.value = 'Compare this';
+    (imageContextManager.hasImages as jest.Mock).mockReturnValue(true);
+    (imageContextManager.getAttachedImages as jest.Mock).mockReturnValue([image]);
+
+    await new InputController(deps).sendMessage();
+
+    expect(routeCollaborationMessage).toHaveBeenCalledWith('Compare this', [image]);
+    expect(imageContextManager.clearImages).toHaveBeenCalled();
+    expect(deps.mockAgentService.query).not.toHaveBeenCalled();
   });
 });
 

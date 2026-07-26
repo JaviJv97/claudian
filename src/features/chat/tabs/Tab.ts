@@ -1711,7 +1711,9 @@ export function initializeTabControllers(
     getSubagentManager: () => services.subagentManager,
     getTabProviderId: () => getTabProviderId(tab, plugin),
     routeCollaborationMessage: (component as Partial<TabManagerViewHost>).routeCollaborationMessage
-      ? content => (component as TabManagerViewHost).routeCollaborationMessage!(tab.id, content)
+      ? (content, images) => (
+        (component as TabManagerViewHost).routeCollaborationMessage!(tab.id, content, images)
+      )
       : undefined,
     turnOwner: tab.session,
     ensureServiceInitialized,

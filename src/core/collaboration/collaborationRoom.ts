@@ -1,10 +1,5 @@
+import type { CollaborationMembership } from '../types/collaboration';
 import type { ProviderId } from '../types/provider';
-
-export interface CollaborationMembership {
-  roomId: string;
-  participantId: ProviderId;
-  conversationIds: Record<ProviderId, string>;
-}
 
 export function createCollaborationRoomId(now = Date.now()): string {
   return `room-${now}-${Math.random().toString(36).slice(2, 9)}`;
