@@ -88,6 +88,7 @@ export class ClaudianView extends ItemView {
   private tabStatePersistence: TabStatePersistenceCoordinator;
   private collaborationCoordinator: CollaborationCoordinator;
   private collaborationTimelines = new Map<TabId, CollaborationTimeline>();
+  private collaborationReconcileQueue: Promise<void> = Promise.resolve();
   private activeCollaborationDeliveries = new Map<string, string>();
 
   constructor(leaf: WorkspaceLeaf, plugin: FeatureHost) {
@@ -940,7 +941,18 @@ export class ClaudianView extends ItemView {
     return true;
   }
 
-  private async reconcileCollaborationTimelines(): Promise<void> {
+  private reconcileCollaborationTimelines(): Promise<void> {
+    // Tab restoration and room creation can request reconciliation concurrently.
+    // Serialize the work so two passes cannot both mount timelines into one tab.
+    const previous = this.collaborationReconcileQueue ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(() => this.performCollaborationTimelineReconciliation());
+    this.collaborationReconcileQueue = operation;
+    return operation;
+  }
+
+  private async performCollaborationTimelineReconciliation(): Promise<void> {
     // Some lightweight test hosts construct the view without running field initializers.
     if (!this.collaborationTimelines) return;
     const tabs = this.tabManager?.getAllTabs() ?? [];
@@ -948,6 +960,12 @@ export class ClaudianView extends ItemView {
     // sequentially, so retaining an early timeline can leave later agents absent.
     for (const timeline of this.collaborationTimelines.values()) timeline.destroy();
     this.collaborationTimelines.clear();
+    // Sweep orphaned roots left by an interrupted or older concurrent pass.
+    for (const tab of tabs) {
+      for (const root of tab.dom.contentEl.querySelectorAll('.claudian-collaboration')) {
+        root.remove();
+      }
+    }
 
     const tabsByRoom = new Map<string, TabData[]>();
     for (const tab of tabs) {
