@@ -162,9 +162,32 @@
   color: var(--text-error);
 }
 
+.claudian-collaboration-recovery {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.claudian-collaboration-recovery-label {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-recovery-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .claudian-collaboration-retry {
-  min-height: 28px;
-  padding: 2px 7px;
+  min-height: 32px;
+  padding: 4px 9px;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: transparent;

@@ -4,6 +4,7 @@ import { MarkdownRenderer, setIcon } from 'obsidian';
 import type { CollaborationEvent, CollaborationRoom, ProviderId } from '../../../core/types';
 import type { FeatureHost } from '../../FeatureHost';
 import type { TabData } from '../tabs/types';
+import { getLatestRetryableDeliveries } from './collaborationRecovery';
 
 interface CollaborationTimelineOptions {
   component: Component;
@@ -32,6 +33,7 @@ function getProviderLabel(providerId: ProviderId): string {
 export class CollaborationTimeline {
   private readonly rootEl: HTMLElement;
   private readonly timelineEl: HTMLElement;
+  private readonly recoveryEl: HTMLElement;
   private readonly statusEls = new Map<ProviderId, HTMLElement>();
   private readonly stopEls = new Map<ProviderId, HTMLButtonElement>();
   private readonly nativeMessagesWrapper: HTMLElement | null;
@@ -58,6 +60,13 @@ export class CollaborationTimeline {
       attr: {
         'aria-live': 'polite',
         'aria-relevant': 'additions text',
+      },
+    });
+    this.recoveryEl = this.rootEl.createDiv({
+      cls: 'claudian-collaboration-recovery claudian-hidden',
+      attr: {
+        'aria-live': 'polite',
+        'aria-label': 'Response recovery actions',
       },
     });
 
@@ -176,6 +185,7 @@ export class CollaborationTimeline {
         cls: 'claudian-collaboration-empty',
         text: 'Send a message to begin the room.',
       });
+      this.renderRecovery(room);
       return;
     }
 
@@ -229,19 +239,6 @@ export class CollaborationTimeline {
           itemEl.createSpan({
             text: `${getProviderLabel(providerId)}: ${delivery.status}`,
           });
-          if (delivery.status === 'failed' || delivery.status === 'cancelled') {
-            const retryButton = itemEl.createEl('button', {
-              cls: 'claudian-collaboration-retry',
-              text: 'Retry',
-              attr: {
-                type: 'button',
-                'aria-label': `Retry with ${getProviderLabel(providerId)}`,
-              },
-            });
-            retryButton.addEventListener('click', () => {
-              void this.options.onRetry(providerId, event.content);
-            });
-          }
         }
       }
       if (event.authorId !== 'user' && event.authorId !== 'system') {
@@ -261,7 +258,43 @@ export class CollaborationTimeline {
       }
       if (generation !== this.renderGeneration) return;
     }
+    this.renderRecovery(room);
     this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
+  }
+
+  private renderRecovery(room: CollaborationRoom): void {
+    const retryable = getLatestRetryableDeliveries(room);
+    this.recoveryEl.empty();
+    this.recoveryEl.toggleClass('claudian-hidden', retryable.length === 0);
+    if (retryable.length === 0) return;
+
+    this.recoveryEl.createSpan({
+      cls: 'claudian-collaboration-recovery-label',
+      text: retryable.length === 1
+        ? `${getProviderLabel(retryable[0].providerId)} ${
+          retryable[0].status === 'cancelled' ? 'was stopped' : 'failed'
+        }.`
+        : 'Some responses need attention.',
+    });
+    const actionsEl = this.recoveryEl.createDiv({
+      cls: 'claudian-collaboration-recovery-actions',
+    });
+    for (const delivery of retryable) {
+      const retryButton = actionsEl.createEl('button', {
+        cls: 'claudian-collaboration-retry',
+        text: `Retry ${getProviderLabel(delivery.providerId)}`,
+        attr: {
+          type: 'button',
+          'aria-label': `Retry with ${getProviderLabel(delivery.providerId)}`,
+        },
+      });
+      retryButton.addEventListener('click', () => {
+        retryButton.disabled = true;
+        void this.options.onRetry(delivery.providerId, delivery.content).catch(() => {
+          retryButton.disabled = false;
+        });
+      });
+    }
   }
 
   private syncRecipientSelection(): void {
