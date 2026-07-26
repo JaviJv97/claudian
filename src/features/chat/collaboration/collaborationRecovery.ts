@@ -22,7 +22,7 @@ export function getLatestRetryableDeliveries(
       ? [{
         providerId,
         status: delivery.status,
-        content: latestUserEvent.content,
+        content: latestUserEvent.recipientContent?.[providerId] ?? latestUserEvent.content,
         eventId: latestUserEvent.id,
       }]
       : []

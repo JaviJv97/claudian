@@ -81,4 +81,15 @@ describe('getLatestRetryableDeliveries', () => {
 
     expect(getLatestRetryableDeliveries(room)).toHaveLength(1);
   });
+
+  it('retries with the failed participant’s addressed content', () => {
+    const room = createRoom();
+    room.events[0].content = '@claude: inspect A\n@codex: inspect B';
+    room.events[0].recipientContent = {
+      claude: 'inspect A',
+      codex: 'inspect B',
+    };
+
+    expect(getLatestRetryableDeliveries(room)[0].content).toBe('inspect A');
+  });
 });

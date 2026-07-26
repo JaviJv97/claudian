@@ -5,13 +5,18 @@
   flex-direction: column;
 }
 
+.claudian-collaboration-controls {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
 .claudian-collaboration-rail {
   display: flex;
   min-height: 44px;
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .claudian-collaboration-rail-label {
@@ -169,8 +174,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
-  border-top: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .claudian-collaboration-recovery-label {

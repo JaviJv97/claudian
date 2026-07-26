@@ -62,6 +62,9 @@ describe('collaboration rooms', () => {
     expect(resolveCollaborationTurn(message, ['claude', 'codex'])).toEqual({
       recipientIds,
       content,
+      recipientContent: Object.fromEntries(
+        recipientIds.map(providerId => [providerId, content]),
+      ),
     });
   });
 
@@ -72,6 +75,42 @@ describe('collaboration rooms', () => {
     )).toEqual({
       recipientIds: ['claude', 'codex'],
       content: 'Ask @codex, then @claude',
+      recipientContent: {
+        claude: 'Ask @codex, then @claude',
+        codex: 'Ask @codex, then @claude',
+      },
+    });
+  });
+
+  it('routes addressed blocks only to their named participants', () => {
+    const message = [
+      'Use only your assigned file.',
+      '@claude: create Claude-Test.md',
+      'Include a checklist.',
+      '@codex: create Codex-Test.md',
+      'Include a checklist.',
+    ].join('\n');
+
+    expect(resolveCollaborationTurn(message, ['claude', 'codex'])).toEqual({
+      content: message,
+      recipientIds: ['claude', 'codex'],
+      recipientContent: {
+        claude: 'Use only your assigned file.\ncreate Claude-Test.md\nInclude a checklist.',
+        codex: 'Use only your assigned file.\ncreate Codex-Test.md\nInclude a checklist.',
+      },
+    });
+  });
+
+  it('strips an optional colon from a single leading directive', () => {
+    expect(resolveCollaborationTurn(
+      '@claude: create Claude-Test.md',
+      ['claude', 'codex'],
+    )).toEqual({
+      content: 'create Claude-Test.md',
+      recipientIds: ['claude'],
+      recipientContent: {
+        claude: 'create Claude-Test.md',
+      },
     });
   });
 });

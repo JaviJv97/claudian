@@ -27,6 +27,7 @@ export type CollaborationDispatch = (
 export interface SendCollaborationTurnOptions {
   content: string;
   recipientIds: ProviderId[];
+  recipientContent?: Partial<Record<ProviderId, string>>;
   attachments?: CollaborationAttachment[];
   dispatch: CollaborationDispatch;
 }
@@ -88,6 +89,9 @@ export class CollaborationCoordinator {
       authorId: 'user',
       recipientIds: recipients.map(participant => participant.providerId),
       content: options.content,
+      recipientContent: options.recipientContent
+        ? { ...options.recipientContent }
+        : undefined,
       createdAt: this.now(),
       delivery: Object.fromEntries(
         recipients.map(participant => [participant.providerId, { status: 'pending' }]),
@@ -143,7 +147,7 @@ export class CollaborationCoordinator {
       const result = await dispatch(participant, {
         eventId: event.id,
         roomId: room.id,
-        content: event.content,
+        content: event.recipientContent?.[participant.providerId] ?? event.content,
       }, abortController.signal);
       await this.setDelivery(room.id, event, participant.providerId, {
         status: 'completed',

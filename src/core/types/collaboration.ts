@@ -44,6 +44,8 @@ export interface CollaborationEvent {
   authorId: CollaborationAuthorId;
   recipientIds: CollaborationRecipientId[];
   content: string;
+  /** Provider-specific prompt text for addressed multi-participant turns. */
+  recipientContent?: Partial<Record<ProviderId, string>>;
   createdAt: number;
   delivery: Record<ProviderId, CollaborationDelivery>;
   attachments?: CollaborationAttachment[];

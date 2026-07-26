@@ -591,6 +591,7 @@ export class ClaudianView extends ItemView {
     const turn = await this.collaborationCoordinator.send(room, {
       content: collaborationTurn.content,
       recipientIds: collaborationTurn.recipientIds,
+      recipientContent: collaborationTurn.recipientContent,
       attachments: images,
       dispatch: async (participant, request, signal) => {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));

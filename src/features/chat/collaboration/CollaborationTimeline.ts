@@ -54,7 +54,6 @@ export class CollaborationTimeline {
       this.nativeMessagesWrapper ?? options.hostTab.dom.contentEl.firstChild,
     );
 
-    this.buildParticipantRail();
     this.timelineEl = this.rootEl.createDiv({
       cls: 'claudian-collaboration-timeline',
       attr: {
@@ -62,13 +61,17 @@ export class CollaborationTimeline {
         'aria-relevant': 'additions text',
       },
     });
-    this.recoveryEl = this.rootEl.createDiv({
+    const controlsEl = this.rootEl.createDiv({
+      cls: 'claudian-collaboration-controls',
+    });
+    this.recoveryEl = controlsEl.createDiv({
       cls: 'claudian-collaboration-recovery claudian-hidden',
       attr: {
         'aria-live': 'polite',
         'aria-label': 'Response recovery actions',
       },
     });
+    this.buildParticipantRail(controlsEl);
 
     for (const tab of options.participantTabs) {
       this.cleanups.push(tab.state.subscribe({
@@ -95,8 +98,8 @@ export class CollaborationTimeline {
     this.rootEl.remove();
   }
 
-  private buildParticipantRail(): void {
-    const railEl = this.rootEl.createDiv({
+  private buildParticipantRail(containerEl: HTMLElement): void {
+    const railEl = containerEl.createDiv({
       cls: 'claudian-collaboration-rail',
       attr: {
         'aria-label': 'Message recipients',

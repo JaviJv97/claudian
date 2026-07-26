@@ -120,6 +120,41 @@ describe('CollaborationCoordinator', () => {
     expect(room.events[0].attachments).not.toBe(turn.event.attachments);
   });
 
+  it('dispatches participant-specific content while preserving shared display text', async () => {
+    const room = createRoom();
+    const storage = createStorage(room);
+    const coordinator = new CollaborationCoordinator({
+      storage,
+      generateId: () => 'event-1',
+      now: () => 10,
+    });
+    const dispatch = jest.fn().mockResolvedValue({});
+
+    const turn = await coordinator.send(room, {
+      content: '@claude: inspect A\n@codex: inspect B',
+      recipientIds: ['claude', 'codex'],
+      recipientContent: {
+        claude: 'inspect A',
+        codex: 'inspect B',
+      },
+      dispatch,
+    });
+    await turn.completion;
+
+    expect(turn.event.content).toBe('@claude: inspect A\n@codex: inspect B');
+    expect(turn.event.recipientContent).toEqual({
+      claude: 'inspect A',
+      codex: 'inspect B',
+    });
+    expect(dispatch.mock.calls.map(call => [
+      call[0].providerId,
+      call[1].content,
+    ])).toEqual([
+      ['claude', 'inspect A'],
+      ['codex', 'inspect B'],
+    ]);
+  });
+
   it('preserves a successful delivery when another participant fails', async () => {
     const room = createRoom();
     const storage = createStorage(room);
