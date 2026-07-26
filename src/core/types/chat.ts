@@ -1,3 +1,4 @@
+import type { CollaborationMembership } from '../collaboration/collaborationRoom';
 import type { SDKToolUseResult } from './diff';
 import type { ProviderId } from './provider';
 import type { SubagentMode, ToolCallInfo, ToolProviderPayload } from './tools';
@@ -75,6 +76,8 @@ export interface Conversation {
   selectedModel?: string;
   /** Opaque provider-owned state bag (session tracking, fork metadata, etc.). */
   providerState?: Record<string, unknown>;
+  /** Provider-neutral membership in a shared multi-agent collaboration room. */
+  collaboration?: CollaborationMembership;
   messages: ChatMessage[];
   currentNote?: string;
   /** Session-specific external context paths (directories with full access). Resets on new session. */
@@ -122,6 +125,8 @@ export interface SessionMetadata {
   selectedModel?: string;
   /** Opaque provider-owned state bag. */
   providerState?: Record<string, unknown>;
+  /** Provider-neutral membership in a shared multi-agent collaboration room. */
+  collaboration?: CollaborationMembership;
   currentNote?: string;
   externalContextPaths?: string[];
   enabledMcpServers?: string[];

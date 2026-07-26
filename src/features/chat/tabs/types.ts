@@ -71,6 +71,9 @@ export interface TabManagerViewHost extends Component {
 
   /** Gets view-owned elements that should preserve active tab selection context. */
   getSharedSelectionFocusScopeEls?(): HTMLElement[];
+
+  /** Routes a user turn across a linked multi-provider collaboration room. */
+  routeCollaborationMessage?(originTabId: TabId, content: string): Promise<boolean>;
 }
 
 /**

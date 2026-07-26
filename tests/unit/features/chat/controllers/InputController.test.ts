@@ -358,6 +358,22 @@ describe('InputController - Missing provider session', () => {
   });
 });
 
+describe('InputController - Collaboration routing', () => {
+  it('routes typed text before starting a provider turn', async () => {
+    const routeCollaborationMessage = jest.fn().mockResolvedValue(true);
+    const deps = createSendableDeps({ routeCollaborationMessage });
+    const inputEl = deps.getInputEl();
+    inputEl.value = '@all compare these approaches';
+
+    await new InputController(deps).sendMessage();
+
+    expect(routeCollaborationMessage).toHaveBeenCalledWith('@all compare these approaches');
+    expect(deps.mockAgentService.query).not.toHaveBeenCalled();
+    expect(inputEl.value).toBe('');
+    expect(deps.resetInputHeight).toHaveBeenCalled();
+  });
+});
+
 describe('InputController - Message Queue', () => {
   let controller: InputController;
   let deps: InputControllerDeps;

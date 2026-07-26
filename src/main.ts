@@ -238,6 +238,15 @@ export default class ClaudianPlugin extends Plugin {
       });
 
       this.addCommand({
+        id: 'start-claude-codex-collaboration',
+        name: 'Start Claude + Codex collaboration',
+        callback: async () => {
+          const view = await this.ensureViewOpen();
+          await view?.startClaudeCodexCollaboration();
+        },
+      });
+
+      this.addCommand({
         id: 'close-current-tab',
         name: 'Close current tab',
         checkCallback: (checking: boolean) => {
@@ -749,6 +758,7 @@ export default class ClaudianPlugin extends Plugin {
       sessionId: meta.sessionId !== undefined ? meta.sessionId : meta.id,
       selectedModel: meta.selectedModel,
       providerState: meta.providerState,
+      collaboration: meta.collaboration,
       messages: [],
       currentNote: meta.currentNote,
       externalContextPaths: meta.externalContextPaths,

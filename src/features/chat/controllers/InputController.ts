@@ -120,6 +120,7 @@ export interface InputControllerDeps {
   /** Toggles the active provider's fast service tier when available. */
   toggleFastMode?: () => Promise<boolean>;
   restorePrePlanPermissionModeIfNeeded?: () => void | Promise<void>;
+  routeCollaborationMessage?: (content: string) => Promise<boolean>;
   turnOwner?: ActiveTurnOwner;
 }
 
@@ -130,6 +131,7 @@ export interface SendMessageOptions {
   content?: string;
   images?: ChatMessage['images'];
   turnRequestOverride?: ChatTurnRequest;
+  skipCollaborationRouting?: boolean;
 }
 
 interface PendingProviderUserMessage {
@@ -268,6 +270,18 @@ export class InputController {
         this.deps.resetInputHeight();
       }
       await this.executeBuiltInCommand(builtInCmd.command, builtInCmd.args);
+      return;
+    }
+
+    if (
+      shouldUseInput
+      && !hasImages
+      && !options?.skipCollaborationRouting
+      && this.deps.routeCollaborationMessage
+      && await this.deps.routeCollaborationMessage(content)
+    ) {
+      inputEl.value = '';
+      this.deps.resetInputHeight();
       return;
     }
 

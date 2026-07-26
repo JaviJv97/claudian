@@ -8,6 +8,16 @@
 
 An Obsidian plugin that embeds AI coding agents (Claude Code, Codex, Grok, Opencode, Pi, and more to come) in your vault. Your vault becomes the agent's working directory — file read/write, search, bash, and multi-step workflows all work out of the box.
 
+> **Fork preview: Claude + Codex collaboration rooms**
+>
+> Run **Claudian: Start Claude + Codex collaboration** from the Obsidian command
+> palette to create linked Claude and Codex sessions. Messages sent from either
+> linked tab go to both agents by default. Prefix a message with `@claude` or
+> `@codex` to address one participant, or use `@all` explicitly. Collaboration
+> membership is stored with the session metadata so the link survives restart.
+> Text routing is implemented in this first slice; attachments and a unified
+> transcript view are planned next.
+
 ## Features & Usage
 
 Open the chat sidebar from the ribbon icon or command palette. Select text and use the hotkey for inline edit. Everything works like your familiar coding agent, Claude Code, Codex, Grok, Opencode, and Pi — talk to the agent, and it reads, writes, edits, and searches files in your vault.

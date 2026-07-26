@@ -1,6 +1,11 @@
 import type { EventRef, WorkspaceLeaf } from 'obsidian';
 import { ItemView, Notice, Scope, setIcon } from 'obsidian';
 
+import {
+  createCollaborationMemberships,
+  createCollaborationRoomId,
+  resolveCollaborationRecipients,
+} from '../../core/collaboration/collaborationRoom';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
 import {
@@ -464,6 +469,110 @@ export class ClaudianView extends ItemView {
       return;
     }
     this.updateTabBarVisibility();
+  }
+
+  async startClaudeCodexCollaboration(): Promise<boolean> {
+    if (!this.tabManager) {
+      new Notice('Open Claudian before starting a collaboration room.');
+      return false;
+    }
+    if (!ProviderRegistry.isEnabled('codex', this.plugin.settings)) {
+      new Notice('Enable Codex in Claudian settings before starting a collaboration room.');
+      return false;
+    }
+
+    const maxTabs = Math.max(3, Math.min(10, this.plugin.settings.maxTabs ?? 3));
+    if (this.tabManager.getTabCount() + 2 > maxTabs) {
+      new Notice('A collaboration room needs two available tabs.');
+      return false;
+    }
+
+    const roomId = createCollaborationRoomId();
+    const claudeConversation = await this.plugin.createConversation({ providerId: 'claude' });
+    const codexConversation = await this.plugin.createConversation({ providerId: 'codex' });
+    const memberships = createCollaborationMemberships(roomId, {
+      claude: claudeConversation.id,
+      codex: codexConversation.id,
+    });
+
+    await Promise.all([
+      this.plugin.updateConversation(claudeConversation.id, {
+        title: 'Collaboration · Claude',
+        collaboration: memberships.claude,
+      }),
+      this.plugin.updateConversation(codexConversation.id, {
+        title: 'Collaboration · Codex',
+        collaboration: memberships.codex,
+      }),
+    ]);
+
+    const claudeTab = await this.tabManager.createTab(
+      claudeConversation.id,
+      undefined,
+      { activate: false },
+    );
+    const codexTab = await this.tabManager.createTab(
+      codexConversation.id,
+      undefined,
+      { activate: true },
+    );
+
+    if (!claudeTab || !codexTab) {
+      if (claudeTab) await this.tabManager.closeTab(claudeTab.id, true);
+      if (codexTab) await this.tabManager.closeTab(codexTab.id, true);
+      await Promise.all([
+        this.plugin.deleteConversation(claudeConversation.id),
+        this.plugin.deleteConversation(codexConversation.id),
+      ]);
+      new Notice('Could not open both collaboration participants.');
+      return false;
+    }
+
+    this.updateTabBarVisibility();
+    new Notice('Claude + Codex collaboration room created.');
+    return true;
+  }
+
+  async routeCollaborationMessage(originTabId: TabId, content: string): Promise<boolean> {
+    const originTab = this.tabManager?.getTab(originTabId);
+    const originConversation = originTab?.conversationId
+      ? this.plugin.getConversationSync(originTab.conversationId)
+      : null;
+    const membership = originConversation?.collaboration;
+    if (!originTab || !membership || !this.tabManager) return false;
+
+    const participantIds = Object.keys(membership.conversationIds);
+    const recipientIds = resolveCollaborationRecipients(content, participantIds);
+    const tabsByConversationId = new Map(
+      this.tabManager
+        .getAllTabs()
+        .filter(tab => tab.conversationId !== null)
+        .map(tab => [tab.conversationId as string, tab]),
+    );
+
+    const recipientTabs = recipientIds.map((participantId) => {
+      const conversationId = membership.conversationIds[participantId];
+      return conversationId ? tabsByConversationId.get(conversationId) ?? null : null;
+    });
+    if (recipientTabs.some(tab => tab === null)) {
+      new Notice('Open every collaboration participant before sending to the room.');
+      return true;
+    }
+
+    const includesOrigin = recipientTabs.some(tab => tab?.id === originTabId);
+    for (const tab of recipientTabs) {
+      if (!tab || tab.id === originTabId) continue;
+      void tab.controllers.inputController?.sendMessage({
+        content,
+        editorContextOverride: null,
+        browserContextOverride: null,
+        canvasContextOverride: null,
+        skipCollaborationRouting: true,
+      }).catch(() => new Notice(`Failed to send collaboration turn to ${tab.providerId}.`));
+    }
+
+    // Let the origin controller perform its normal send when it is a recipient.
+    return !includesOrigin;
   }
 
   private updateTabBar(): void {
