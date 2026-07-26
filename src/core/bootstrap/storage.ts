@@ -16,6 +16,12 @@ export interface CollaborationRoomStorage {
     now?: number;
   }): Promise<CollaborationRoom>;
   get(id: string): Promise<CollaborationRoom | null>;
+  updateParticipantConversation(
+    roomId: string,
+    providerId: ProviderId,
+    conversationId: string,
+    now?: number,
+  ): Promise<CollaborationRoom>;
   appendEvent(roomId: string, event: CollaborationEvent): Promise<CollaborationRoom>;
   updateDelivery(
     roomId: string,

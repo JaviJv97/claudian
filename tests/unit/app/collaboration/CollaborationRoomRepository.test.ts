@@ -118,6 +118,43 @@ describe('CollaborationRoomRepository', () => {
     });
   });
 
+  it('rebinds one participant conversation without changing room history', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [
+        { providerId: 'claude', conversationId: 'conversation-claude' },
+        { providerId: 'codex', conversationId: 'conversation-codex-old' },
+      ],
+      now: 100,
+    });
+    await repository.appendEvent('room-1', {
+      id: 'event-1',
+      kind: 'message',
+      authorId: 'user',
+      recipientIds: ['codex'],
+      content: 'Inspect this',
+      createdAt: 101,
+      delivery: { codex: { status: 'completed' } },
+    });
+
+    await repository.updateParticipantConversation(
+      'room-1',
+      'codex',
+      'conversation-codex-new',
+      110,
+    );
+
+    const room = await repository.get('room-1');
+    expect(room?.participants).toEqual([
+      { providerId: 'claude', conversationId: 'conversation-claude' },
+      { providerId: 'codex', conversationId: 'conversation-codex-new' },
+    ]);
+    expect(room?.events.map(event => event.id)).toEqual(['event-1']);
+    expect(room?.updatedAt).toBe(110);
+  });
+
   it.each(['', '../escape', 'nested/room', '/absolute'])(
     'rejects unsafe room id %p',
     async (id) => {

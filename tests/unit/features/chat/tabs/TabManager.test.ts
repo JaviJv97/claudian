@@ -3039,7 +3039,11 @@ describe('TabManager - Callback Wiring', () => {
 
       // Tab's conversationId should be synced
       expect(tabData.conversationId).toBe('new-conv-id');
-      expect(onTabConversationChanged).toHaveBeenCalledWith('test-tab', 'new-conv-id');
+      expect(onTabConversationChanged).toHaveBeenCalledWith(
+        'test-tab',
+        'new-conv-id',
+        null,
+      );
       expect((manager as any).tabCommandContextRevisions.get('test-tab')).toBe(1);
       expect((manager as any).providerRuntimeCommandCache.has('test-tab')).toBe(false);
       expect(invalidateDiscovery).toHaveBeenCalledTimes(1);

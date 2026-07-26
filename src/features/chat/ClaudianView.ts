@@ -24,6 +24,7 @@ import {
   type ScheduledAnimationFrame,
 } from '../../utils/animationFrame';
 import type { FeatureHost } from '../FeatureHost';
+import { findCollaborationRebindCandidates } from './collaboration/collaborationRebinding';
 import { groupCollaborationTabBarItems } from './collaboration/collaborationTabs';
 import { CollaborationTimeline } from './collaboration/CollaborationTimeline';
 import type { HistoryConversationStatus } from './controllers/ConversationController';
@@ -272,11 +273,15 @@ export class ClaudianView extends ItemView {
         onTabRewindingChanged: () => this.updateTabBar(),
         onTabTitleChanged: () => this.updateTabBar(),
         onTabAttentionChanged: () => this.updateTabBar(),
-        onTabConversationChanged: () => {
+        onTabConversationChanged: (tabId, conversationId, previousConversationId) => {
           this.updateTabBar();
           this.updateHistoryDropdown();
           this.syncProviderBrandColor();
-          void this.reconcileCollaborationTimelines();
+          void this.handleTabConversationRebind(
+            tabId,
+            conversationId,
+            previousConversationId,
+          );
         },
         onTabProviderChanged: () => {
           this.updateTabBar();
@@ -611,6 +616,15 @@ export class ClaudianView extends ItemView {
         } finally {
           signal.removeEventListener('abort', cancel);
         }
+        if (tab.conversationId && tab.conversationId !== participant.conversationId) {
+          const reboundRoom = await this.rebindCollaborationParticipant(
+            room.id,
+            participant.providerId,
+            tab.conversationId,
+          );
+          room.participants = reboundRoom.participants;
+          participant.conversationId = tab.conversationId;
+        }
 
         const assistantMessage = [...tab.state.messages]
           .reverse()
@@ -667,9 +681,8 @@ export class ClaudianView extends ItemView {
     }
 
     for (const [roomId, roomTabs] of tabsByRoom) {
-      if (roomTabs.length < 2) continue;
-      const existingRoom = await this.plugin.storage.rooms.get(roomId);
-      if (!existingRoom) {
+      let room = await this.plugin.storage.rooms.get(roomId);
+      if (!room) {
         const membership = roomTabs
           .map(tab => (
             tab.conversationId
@@ -678,7 +691,7 @@ export class ClaudianView extends ItemView {
           ))
           .find(candidate => candidate?.roomId === roomId);
         if (!membership) continue;
-        await this.plugin.storage.rooms.create({
+        room = await this.plugin.storage.rooms.create({
           id: roomId,
           title: 'Claude + Codex',
           participants: Object.entries(membership.conversationIds).map(
@@ -686,6 +699,24 @@ export class ClaudianView extends ItemView {
           ),
         });
       }
+      const tabIdentities = tabs.map(tab => ({
+        tabId: tab.id,
+        providerId: tab.providerId,
+        conversationId: tab.conversationId,
+        roomId: tab.conversationId
+          ? this.plugin.getConversationSync(tab.conversationId)?.collaboration?.roomId ?? null
+          : null,
+      }));
+      for (const candidate of findCollaborationRebindCandidates(room, tabIdentities)) {
+        room = await this.rebindCollaborationParticipant(
+          room.id,
+          candidate.providerId,
+          candidate.conversationId,
+        );
+        const replacementTab = tabs.find(tab => tab.id === candidate.tabId);
+        if (replacementTab && !roomTabs.includes(replacementTab)) roomTabs.push(replacementTab);
+      }
+      if (roomTabs.length < 2) continue;
       for (const tab of roomTabs) {
         if (this.collaborationTimelines.has(tab.id)) continue;
         this.collaborationTimelines.set(tab.id, new CollaborationTimeline({
@@ -708,6 +739,50 @@ export class ClaudianView extends ItemView {
       }
     }
     this.updateTabBar();
+  }
+
+  private async handleTabConversationRebind(
+    tabId: TabId,
+    conversationId: string | null,
+    previousConversationId: string | null,
+  ): Promise<void> {
+    const previousMembership = previousConversationId
+      ? this.plugin.getConversationSync(previousConversationId)?.collaboration
+      : null;
+    if (conversationId && previousMembership) {
+      await this.rebindCollaborationParticipant(
+        previousMembership.roomId,
+        previousMembership.participantId,
+        conversationId,
+      );
+    }
+    await this.reconcileCollaborationTimelines();
+    this.collaborationTimelines.get(tabId)?.refresh();
+  }
+
+  private async rebindCollaborationParticipant(
+    roomId: string,
+    providerId: ProviderId,
+    conversationId: string,
+  ) {
+    const room = await this.plugin.storage.rooms.updateParticipantConversation(
+      roomId,
+      providerId,
+      conversationId,
+    );
+    const conversationIds = Object.fromEntries(
+      room.participants.map(participant => [
+        participant.providerId,
+        participant.conversationId,
+      ]),
+    );
+    const memberships = createCollaborationMemberships(room.id, conversationIds);
+    await Promise.all(room.participants.map(participant => (
+      this.plugin.updateConversation(participant.conversationId, {
+        collaboration: memberships[participant.providerId],
+      })
+    )));
+    return room;
   }
 
   private refreshCollaborationTimelines(roomId: string): void {

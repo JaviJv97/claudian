@@ -310,7 +310,11 @@ export interface TabManagerCallbacks {
   onTabAttentionChanged?: (tabId: TabId, needsAttention: boolean) => void;
 
   /** Called when a tab's conversation changes (loaded different conversation in same tab). */
-  onTabConversationChanged?: (tabId: TabId, conversationId: string | null) => void;
+  onTabConversationChanged?: (
+    tabId: TabId,
+    conversationId: string | null,
+    previousConversationId: string | null,
+  ) => void;
 
   /** Called when the active provider changes within a tab (blank tab model selection). */
   onTabProviderChanged?: (tabId: TabId, providerId: ProviderId) => void;

@@ -70,6 +70,25 @@ export class CollaborationRoomRepository {
     });
   }
 
+  async updateParticipantConversation(
+    roomId: string,
+    providerId: ProviderId,
+    conversationId: string,
+    now = Date.now(),
+  ): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      const participant = room.participants.find(candidate => (
+        candidate.providerId === providerId
+      ));
+      if (!participant) {
+        throw new Error(`Collaboration participant not found: ${providerId}`);
+      }
+      participant.conversationId = conversationId;
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
   async updateDelivery(
     roomId: string,
     eventId: string,
