@@ -17,6 +17,7 @@ export {
   type CollaborationAuthorId,
   type CollaborationDelivery,
   type CollaborationDeliveryStatus,
+  type CollaborationDiscussionMode,
   type CollaborationEvent,
   type CollaborationMembership,
   type CollaborationParticipant,

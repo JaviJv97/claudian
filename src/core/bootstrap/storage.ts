@@ -2,6 +2,7 @@ import type { AppSessionStorage, AppTabManagerState } from '../providers/types';
 import type { VaultFileAdapter } from '../storage/VaultFileAdapter';
 import type {
   CollaborationDelivery,
+  CollaborationDiscussionMode,
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
@@ -23,6 +24,17 @@ export interface CollaborationRoomStorage {
     roomId: string,
     participantId: string,
     replacement: CollaborationParticipant,
+    now?: number,
+  ): Promise<CollaborationRoom>;
+  updateDiscussionMode(
+    roomId: string,
+    mode: CollaborationDiscussionMode,
+    now?: number,
+  ): Promise<CollaborationRoom>;
+  updateParticipantCursor(
+    roomId: string,
+    participantId: string,
+    eventId: string,
     now?: number,
   ): Promise<CollaborationRoom>;
   updateParticipantConversation(

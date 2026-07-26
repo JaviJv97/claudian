@@ -8,6 +8,7 @@ import {
   getCollaborationParticipantId,
   resolveCollaborationTurn,
 } from '../../core/collaboration/collaborationRoom';
+import { buildCollaborationPrompt } from '../../core/collaboration/collaborationTranscript';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
 import {
@@ -17,7 +18,7 @@ import {
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
-import type { ImageAttachment } from '../../core/types';
+import type { CollaborationEvent, ImageAttachment } from '../../core/types';
 import { VIEW_TYPE_CLAUDIAN } from '../../core/types';
 import {
   cancelScheduledAnimationFrame,
@@ -822,6 +823,14 @@ export class ClaudianView extends ItemView {
       content,
       room.participants.map(getCollaborationParticipantId),
     );
+    const discussionMode = room.discussionMode ?? 'parallel';
+    if (
+      discussionMode === 'mentioned-only'
+      && !/(^|\s)@(?:all|[A-Za-z0-9][A-Za-z0-9._-]*)\b/i.test(content)
+    ) {
+      new Notice('Mention an agent or choose a recipient in mentioned-only mode.');
+      return true;
+    }
     const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
     const sharedReferencedFiles = findSharedReferencedFiles(
       Object.fromEntries(collaborationTurn.recipientIds.map(providerId => [
@@ -846,6 +855,13 @@ export class ClaudianView extends ItemView {
       recipientIds: collaborationTurn.recipientIds,
       recipientContent: collaborationTurn.recipientContent,
       attachments: images,
+      strategy: discussionMode === 'round-table' ? 'sequential' : 'parallel',
+      prepareContent: (participant, event) => buildCollaborationPrompt(
+        room,
+        getCollaborationParticipantId(participant),
+        event.recipientContent?.[getCollaborationParticipantId(participant)] ?? event.content,
+        { currentEventId: event.id },
+      ),
       dispatch: async (participant, request, signal) => {
         const participantId = getCollaborationParticipantId(participant);
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
@@ -893,7 +909,7 @@ export class ClaudianView extends ItemView {
           existingAssistantIds,
         );
         if (assistantMessage) {
-          await this.plugin.storage.rooms.appendEvent(room.id, {
+          const assistantEvent: CollaborationEvent = {
             id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
             kind: 'message',
             authorId: participantId,
@@ -902,7 +918,18 @@ export class ClaudianView extends ItemView {
             createdAt: assistantMessage.timestamp,
             delivery: {},
             sourceMessageId: assistantMessage.id,
-          });
+          };
+          await this.plugin.storage.rooms.appendEvent(room.id, assistantEvent);
+          room.events.push(structuredClone(assistantEvent));
+          await this.plugin.storage.rooms.updateParticipantCursor(
+            room.id,
+            participantId,
+            discussionMode === 'round-table' ? assistantEvent.id : request.eventId,
+          );
+          room.participantLastSeenEventIds ??= {};
+          room.participantLastSeenEventIds[participantId] = discussionMode === 'round-table'
+            ? assistantEvent.id
+            : request.eventId;
           this.refreshCollaborationTimelines(room.id);
         }
         if (signal.aborted || assistantMessage?.isInterrupt) {
@@ -1042,6 +1069,17 @@ export class ClaudianView extends ItemView {
           ])),
           plugin: this.plugin,
           roomId,
+          discussionMode: room.discussionMode ?? 'parallel',
+          onDiscussionModeChange: async (mode) => {
+            await this.plugin.storage.rooms.updateDiscussionMode(roomId, mode);
+            new Notice(
+              mode === 'round-table'
+                ? 'Round table: agents respond sequentially with shared context.'
+                : mode === 'parallel'
+                  ? 'Parallel: agents respond together and share context next turn.'
+                  : 'Mentions: only selected agents respond.',
+            );
+          },
           canStop: providerId => this.activeCollaborationDeliveries.has(
             this.getCollaborationDeliveryKey(roomId, providerId),
           ),

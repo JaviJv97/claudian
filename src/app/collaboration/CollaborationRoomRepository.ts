@@ -2,6 +2,7 @@ import { getCollaborationParticipantId } from '../../core/collaboration/collabor
 import type { VaultFileAdapter } from '../../core/storage/VaultFileAdapter';
 import type {
   CollaborationDelivery,
+  CollaborationDiscussionMode,
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
@@ -41,6 +42,8 @@ export class CollaborationRoomRepository {
       id: options.id,
       title: options.title,
       status: 'active',
+      discussionMode: 'round-table',
+      participantLastSeenEventIds: {},
       createdAt: now,
       updatedAt: now,
       participants: options.participants.map(participant => ({ ...participant })),
@@ -151,6 +154,37 @@ export class CollaborationRoomRepository {
         throw new Error(`Collaboration participant already exists: ${replacementId}`);
       }
       room.participants[index] = { ...replacement };
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
+  async updateDiscussionMode(
+    roomId: string,
+    mode: CollaborationDiscussionMode,
+    now = Date.now(),
+  ): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      room.discussionMode = mode;
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
+  async updateParticipantCursor(
+    roomId: string,
+    participantId: string,
+    eventId: string,
+    now = Date.now(),
+  ): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      if (!room.participants.some(participant => (
+        getCollaborationParticipantId(participant) === participantId
+      ))) {
+        throw new Error(`Collaboration participant not found: ${participantId}`);
+      }
+      room.participantLastSeenEventIds ??= {};
+      room.participantLastSeenEventIds[participantId] = eventId;
       room.updatedAt = Math.max(room.updatedAt, now);
       return room;
     });

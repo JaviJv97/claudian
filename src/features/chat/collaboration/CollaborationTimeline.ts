@@ -1,7 +1,12 @@
 import type { Component } from 'obsidian';
 import { MarkdownRenderer, setIcon } from 'obsidian';
 
-import type { CollaborationEvent, CollaborationRoom, ProviderId } from '../../../core/types';
+import type {
+  CollaborationDiscussionMode,
+  CollaborationEvent,
+  CollaborationRoom,
+  ProviderId,
+} from '../../../core/types';
 import type { FeatureHost } from '../../FeatureHost';
 import type { TabData } from '../tabs/types';
 import { getLatestRetryableDeliveries } from './collaborationRecovery';
@@ -13,6 +18,8 @@ interface CollaborationTimelineOptions {
   participantLabels: Record<string, string>;
   plugin: FeatureHost;
   roomId: string;
+  discussionMode: CollaborationDiscussionMode;
+  onDiscussionModeChange: (mode: CollaborationDiscussionMode) => Promise<void>;
   canStop: (providerId: ProviderId) => boolean;
   onStop: (providerId: ProviderId) => void;
   onRetry: (providerId: ProviderId, content: string) => Promise<void>;
@@ -51,9 +58,11 @@ export class CollaborationTimeline {
   private readonly stopEls = new Map<ProviderId, HTMLButtonElement>();
   private readonly nativeMessagesWrapper: HTMLElement | null;
   private readonly cleanups: Array<() => void> = [];
+  private discussionMode: CollaborationDiscussionMode;
   private renderGeneration = 0;
 
   constructor(private readonly options: CollaborationTimelineOptions) {
+    this.discussionMode = options.discussionMode;
     this.nativeMessagesWrapper = options.hostTab.dom.messagesEl.parentElement;
     this.nativeMessagesWrapper?.addClass('claudian-hidden');
     this.rootEl = options.hostTab.dom.contentEl.createDiv({
@@ -125,6 +134,62 @@ export class CollaborationTimeline {
       cls: 'claudian-collaboration-roster-members',
       text: participantIds.map(id => this.getParticipantLabel(id)).join(' · '),
     });
+    const modeEl = rosterEl.createDiv({
+      cls: 'claudian-collaboration-modes',
+      attr: { role: 'group', 'aria-label': 'Discussion mode' },
+    });
+    const modes: Array<{
+      id: CollaborationDiscussionMode;
+      label: string;
+      title: string;
+    }> = [
+      {
+        id: 'round-table',
+        label: 'Round table',
+        title: 'Agents respond one at a time and see earlier responses in this round.',
+      },
+      {
+        id: 'parallel',
+        label: 'Parallel',
+        title: 'Agents respond together and see one another’s responses next turn.',
+      },
+      {
+        id: 'mentioned-only',
+        label: 'Mentions',
+        title: 'Only agents you explicitly select or mention respond.',
+      },
+    ];
+    for (const mode of modes) {
+      const button = modeEl.createEl('button', {
+        cls: [
+          'claudian-collaboration-mode',
+          mode.id === this.discussionMode ? 'is-selected' : '',
+        ].filter(Boolean).join(' '),
+        text: mode.label,
+        attr: {
+          type: 'button',
+          title: mode.title,
+          'aria-pressed': mode.id === this.discussionMode ? 'true' : 'false',
+          'data-mode': mode.id,
+        },
+      });
+      button.addEventListener('click', () => {
+        if (mode.id === this.discussionMode) return;
+        button.disabled = true;
+        void this.options.onDiscussionModeChange(mode.id)
+          .then(() => {
+            this.discussionMode = mode.id;
+            for (const candidate of modeEl.querySelectorAll<HTMLElement>(
+              '.claudian-collaboration-mode',
+            )) {
+              const selected = candidate.dataset.mode === mode.id;
+              candidate.toggleClass('is-selected', selected);
+              candidate.setAttribute('aria-pressed', selected ? 'true' : 'false');
+            }
+          })
+          .finally(() => { button.disabled = false; });
+      });
+    }
 
     const railEl = containerEl.createDiv({
       cls: 'claudian-collaboration-rail',

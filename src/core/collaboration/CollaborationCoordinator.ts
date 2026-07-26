@@ -30,6 +30,11 @@ export interface SendCollaborationTurnOptions {
   recipientIds: string[];
   recipientContent?: Partial<Record<string, string>>;
   attachments?: CollaborationAttachment[];
+  strategy?: 'parallel' | 'sequential';
+  prepareContent?: (
+    participant: CollaborationParticipant,
+    event: CollaborationEvent,
+  ) => Promise<string> | string;
   dispatch: CollaborationDispatch;
 }
 
@@ -115,17 +120,22 @@ export class CollaborationCoordinator {
       });
       return { abortController, key, participant, participantId };
     }));
-    const completion = Promise.allSettled(
-      deliveries.map(delivery => this.dispatch(
+    const dispatchDelivery = (delivery: typeof deliveries[number]) => this.dispatch(
         room,
         event,
         delivery.participant,
         delivery.participantId,
         options.dispatch,
+        options.prepareContent,
         delivery.abortController,
         delivery.key,
-      )),
-    ).then(() => undefined);
+      );
+    const completion = options.strategy === 'sequential'
+      ? deliveries.reduce<Promise<void>>(
+        (previous, delivery) => previous.then(() => dispatchDelivery(delivery)),
+        Promise.resolve(),
+      )
+      : Promise.allSettled(deliveries.map(dispatchDelivery)).then(() => undefined);
     return { event, completion };
   }
 
@@ -144,6 +154,7 @@ export class CollaborationCoordinator {
     participant: CollaborationParticipant,
     participantId: string,
     dispatch: CollaborationDispatch,
+    prepareContent: SendCollaborationTurnOptions['prepareContent'],
     abortController: AbortController,
     key: string,
   ): Promise<void> {
@@ -151,10 +162,13 @@ export class CollaborationCoordinator {
       if (abortController.signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
       }
+      const content = prepareContent
+        ? await prepareContent(participant, event)
+        : event.recipientContent?.[participantId] ?? event.content;
       const result = await dispatch(participant, {
         eventId: event.id,
         roomId: room.id,
-        content: event.recipientContent?.[participantId] ?? event.content,
+        content,
       }, abortController.signal);
       await this.setDelivery(room.id, event, participantId, {
         status: result.conflictFiles?.length ? 'conflict' : 'completed',

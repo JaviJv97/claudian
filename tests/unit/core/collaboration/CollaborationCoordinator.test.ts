@@ -92,6 +92,36 @@ describe('CollaborationCoordinator', () => {
     }));
   });
 
+  it('dispatches recipients sequentially and prepares each prompt after the prior response', async () => {
+    const room = createRoom();
+    const storage = createStorage(room);
+    const order: string[] = [];
+    const coordinator = new CollaborationCoordinator({
+      storage,
+      generateId: () => 'event-1',
+      now: () => 10,
+    });
+
+    const turn = await coordinator.send(room, {
+      content: 'Discuss',
+      recipientIds: ['claude', 'codex'],
+      strategy: 'sequential',
+      prepareContent: async participant => (
+        `${participant.providerId}:${order.join(',') || 'first'}`
+      ),
+      dispatch: async (participant, request) => {
+        order.push(`${participant.providerId}:${request.content}`);
+        return {};
+      },
+    });
+    await turn.completion;
+
+    expect(order).toEqual([
+      'claude:claude:first',
+      'codex:codex:claude:claude:first',
+    ]);
+  });
+
   it('keeps deliveries separate for two participants from the same provider', async () => {
     const room = createRoom();
     room.participants = [

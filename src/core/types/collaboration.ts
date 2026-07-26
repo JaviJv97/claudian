@@ -10,6 +10,7 @@ export type CollaborationDeliveryStatus =
   | 'resolved'
   | 'failed'
   | 'cancelled';
+export type CollaborationDiscussionMode = 'parallel' | 'round-table' | 'mentioned-only';
 
 export interface CollaborationMembership {
   roomId: string;
@@ -68,6 +69,10 @@ export interface CollaborationRoom {
   /** Missing on legacy rooms and treated as active. */
   status?: 'active' | 'archived';
   archivedAt?: number;
+  /** Legacy rooms default to parallel delivery. */
+  discussionMode?: CollaborationDiscussionMode;
+  /** Last durable room event included in each participant's model context. */
+  participantLastSeenEventIds?: Record<string, string>;
   createdAt: number;
   updatedAt: number;
   participants: CollaborationParticipant[];

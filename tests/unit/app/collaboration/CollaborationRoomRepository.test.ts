@@ -229,6 +229,31 @@ describe('CollaborationRoomRepository', () => {
     expect(room.updatedAt).toBe(110);
   });
 
+  it('persists discussion mode and participant transcript cursors', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [
+        { id: 'claude', providerId: 'claude', conversationId: 'conversation-claude' },
+        { id: 'codex', providerId: 'codex', conversationId: 'conversation-codex' },
+      ],
+      now: 100,
+    });
+
+    await repository.updateDiscussionMode('room-1', 'round-table', 110);
+    const room = await repository.updateParticipantCursor(
+      'room-1',
+      'claude',
+      'event-2',
+      120,
+    );
+
+    expect(room.discussionMode).toBe('round-table');
+    expect(room.participantLastSeenEventIds).toEqual({ claude: 'event-2' });
+    expect(room.updatedAt).toBe(120);
+  });
+
   it.each(['', '../escape', 'nested/room', '/absolute'])(
     'rejects unsafe room id %p',
     async (id) => {
