@@ -31,6 +31,12 @@ export interface CollaborationRoomStorage {
     mode: CollaborationDiscussionMode,
     now?: number,
   ): Promise<CollaborationRoom>;
+  updateParticipantResourcePolicy(
+    roomId: string,
+    participantId: string,
+    policy: CollaborationParticipant['resourcePolicy'],
+    now?: number,
+  ): Promise<CollaborationRoom>;
   updateParticipantCursor(
     roomId: string,
     participantId: string,

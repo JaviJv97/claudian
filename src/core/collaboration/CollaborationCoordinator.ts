@@ -37,7 +37,10 @@ export interface SendCollaborationTurnOptions {
     participant: CollaborationParticipant,
     event: CollaborationEvent,
   ) => Promise<string> | string;
-  eventMetadata?: Pick<CollaborationEvent, 'deliberationId' | 'deliberationPhase'>;
+  eventMetadata?: Pick<
+    CollaborationEvent,
+    'deliberationId' | 'deliberationPhase' | 'workflow'
+  >;
   eventAuthorId?: CollaborationEvent['authorId'];
   eventKind?: CollaborationEvent['kind'];
   dispatch: CollaborationDispatch;

@@ -20,8 +20,17 @@ const room: CollaborationRoom = {
 
 describe('collaboration deliberation', () => {
   it('keeps the position phase independent', () => {
-    expect(buildDeliberationInstruction(room, 'position', 'Choose a design', 'd-1'))
-      .toContain('Give your independent position');
+    const instruction = buildDeliberationInstruction(
+      room,
+      'position',
+      'Choose a design',
+      'd-1',
+      'company',
+    );
+
+    expect(instruction).toContain('You are Claude Company');
+    expect(instruction).toContain('Give your independent position');
+    expect(instruction).toContain('Keep your response under 300 words');
   });
 
   it('requires explicit unanimous approval and preserves objections', () => {
@@ -46,6 +55,56 @@ describe('collaboration deliberation', () => {
         approved: false,
         approvals: ['personal', 'codex'],
         objections: ['company'],
+        concerns: [],
+        missing: [],
+      });
+  });
+
+  it('accepts markdown-formatted structured approval without treating concerns as objections', () => {
+    const events = [
+      ['personal', '**VERDICT: APPROVE**\nBLOCKING_OBJECTIONS: NONE\nCONCERNS: Needs monitoring'],
+      ['company', '**APPROVE.**\nThe previously discussed objections are non-blocking.'],
+      ['codex', 'VERDICT: APPROVE\nBLOCKING_OBJECTIONS: NONE'],
+    ].map(([authorId, content], index) => ({
+      id: `event-${index}`,
+      kind: 'message',
+      authorId,
+      recipientIds: ['user'],
+      content,
+      createdAt: index,
+      delivery: {},
+      deliberationId: 'd-2',
+      deliberationPhase: 'ratification',
+    })) as CollaborationEvent[];
+
+    expect(evaluateDeliberationConsensus(events, 'd-2', ['personal', 'company', 'codex']))
+      .toEqual({
+        approved: true,
+        approvals: ['personal', 'company', 'codex'],
+        objections: [],
+        concerns: ['personal', 'company'],
+        missing: [],
+      });
+  });
+
+  it('treats a declared blocking objection as authoritative over APPROVE', () => {
+    const events = [{
+      id: 'event-1',
+      kind: 'message',
+      authorId: 'personal',
+      recipientIds: ['user'],
+      content: 'VERDICT: APPROVE\nBLOCKING_OBJECTIONS: Missing safety evidence',
+      createdAt: 1,
+      delivery: {},
+      deliberationId: 'd-3',
+      deliberationPhase: 'ratification',
+    }] as CollaborationEvent[];
+
+    expect(evaluateDeliberationConsensus(events, 'd-3', ['personal']))
+      .toMatchObject({
+        approved: false,
+        approvals: [],
+        objections: ['personal'],
       });
   });
 });

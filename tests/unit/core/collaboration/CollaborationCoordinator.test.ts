@@ -41,6 +41,38 @@ function createStorage(room: CollaborationRoom) {
 }
 
 describe('CollaborationCoordinator', () => {
+  it('persists autonomous workflow metadata on phase events', async () => {
+    const room = createRoom();
+    const storage = createStorage(room);
+    const coordinator = new CollaborationCoordinator({
+      storage,
+      generateId: () => 'event-workflow',
+      now: () => 10,
+    });
+
+    const turn = await coordinator.send(room, {
+      content: 'Autonomous execution phase',
+      recipientIds: ['claude'],
+      eventAuthorId: 'system',
+      eventKind: 'system',
+      eventMetadata: {
+        workflow: {
+          id: 'workflow-1',
+          deliberationId: 'deliberation-1',
+          phase: 'execution',
+        },
+      },
+      dispatch: async () => ({}),
+    });
+    await turn.completion;
+
+    expect(room.events[0].workflow).toEqual({
+      id: 'workflow-1',
+      deliberationId: 'deliberation-1',
+      phase: 'execution',
+    });
+  });
+
   it('dispatches recipients concurrently and records independent completion', async () => {
     const room = createRoom();
     const storage = createStorage(room);

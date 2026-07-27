@@ -8,12 +8,23 @@ import {
   evaluateDeliberationConsensus,
 } from '../../core/collaboration/collaborationDeliberation';
 import {
+  getPreservedMentionedParticipantIds,
+  getRoutableCollaborationParticipantIds,
+  getUnavailableMentionedParticipantIds,
+  isReadOnlyCollaborationPlan,
+} from '../../core/collaboration/collaborationResourcePolicy';
+import {
   createCollaborationMemberships,
   createCollaborationRoomId,
   getCollaborationParticipantId,
   resolveCollaborationTurn,
 } from '../../core/collaboration/collaborationRoom';
 import { buildCollaborationPrompt } from '../../core/collaboration/collaborationTranscript';
+import {
+  buildCollaborationExecutionInstruction,
+  buildCollaborationReviewInstruction,
+  buildCollaborationVerificationInstruction,
+} from '../../core/collaboration/collaborationWorkflow';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
 import {
@@ -26,6 +37,7 @@ import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } fr
 import type {
   CollaborationDeliberationPhase,
   CollaborationEvent,
+  CollaborationWorkflowPhase,
   ImageAttachment,
 } from '../../core/types';
 import { VIEW_TYPE_CLAUDIAN } from '../../core/types';
@@ -47,6 +59,7 @@ import {
   createCollaborationProposalReview,
 } from './collaboration/collaborationProposalReview';
 import { findCollaborationRebindCandidates } from './collaboration/collaborationRebinding';
+import { CollaborationResourcePolicyModal } from './collaboration/CollaborationResourcePolicyModal';
 import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
 import {
   chooseCollaborationParticipants,
@@ -71,6 +84,13 @@ type LoadableView = {
   containerEl?: HTMLElement;
   load: () => Promise<void> | void;
 };
+
+interface CollaborationWorkflowRoute {
+  id: string;
+  deliberationId: string;
+  originalGoal: string;
+  approvedSynthesis: string;
+}
 
 export class ClaudianView extends ItemView {
   private plugin: FeatureHost;
@@ -820,6 +840,7 @@ export class ClaudianView extends ItemView {
     originTabId: TabId,
     content: string,
     images?: ImageAttachment[],
+    workflow?: CollaborationWorkflowRoute,
   ): Promise<boolean> {
     const originTab = this.tabManager?.getTab(originTabId);
     const originConversation = originTab?.conversationId
@@ -834,11 +855,39 @@ export class ClaudianView extends ItemView {
       return true;
     }
 
-    const collaborationTurn = resolveCollaborationTurn(
+    const unavailableMentions = getUnavailableMentionedParticipantIds(room, content);
+    if (unavailableMentions.length > 0) {
+      new Notice(`${unavailableMentions.join(', ')} is marked unavailable.`);
+      return true;
+    }
+    const preservedOverrides = getPreservedMentionedParticipantIds(room, content);
+    if (preservedOverrides.length > 0) {
+      new Notice(
+        `${preservedOverrides.join(', ')} is in preserve mode; the explicit mention overrides quota preservation.`,
+      );
+    }
+    const routableParticipantIds = getRoutableCollaborationParticipantIds(
+      room,
       content,
-      room.participants.map(getCollaborationParticipantId),
+      Boolean(workflow),
     );
+    if (routableParticipantIds.length === 0) {
+      new Notice('No available agents are eligible for this message.');
+      return true;
+    }
+    const collaborationTurn = resolveCollaborationTurn(content, routableParticipantIds);
     const discussionMode = room.discussionMode ?? 'parallel';
+    if (
+      (discussionMode === 'deliberation' || workflow)
+      && routableParticipantIds.length < 2
+    ) {
+      new Notice(
+        workflow
+          ? 'Autonomous workflows require at least two active agents for cross-review.'
+          : 'Deliberation requires at least two available agents.',
+      );
+      return true;
+    }
     if (
       discussionMode === 'mentioned-only'
       && !/(^|\s)@(?:all|[A-Za-z0-9][A-Za-z0-9._-]*)\b/i.test(content)
@@ -847,13 +896,15 @@ export class ClaudianView extends ItemView {
       return true;
     }
     const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
-    const sharedReferencedFiles = findSharedReferencedFiles(
-      Object.fromEntries(collaborationTurn.recipientIds.map(providerId => [
-        providerId,
-        collaborationTurn.recipientContent?.[providerId] ?? collaborationTurn.content,
-      ])),
-      markdownFiles.map(file => file.path),
-    );
+    const sharedReferencedFiles = workflow
+      ? markdownFiles.map(file => file.path)
+      : findSharedReferencedFiles(
+        Object.fromEntries(collaborationTurn.recipientIds.map(providerId => [
+          providerId,
+          collaborationTurn.recipientContent?.[providerId] ?? collaborationTurn.content,
+        ])),
+        markdownFiles.map(file => file.path),
+      );
     const captureSharedFileSnapshot = async () => captureCollaborationFileSnapshot(
       (await Promise.all(sharedReferencedFiles.map(async (path) => {
         const stat = await this.plugin.app.vault.adapter.stat(path);
@@ -884,6 +935,7 @@ export class ClaudianView extends ItemView {
     const fileContentBaseline = await captureSharedFileContentSnapshot();
     let activeDeliberationId: string | undefined;
     let activeDeliberationPhase: CollaborationDeliberationPhase | undefined;
+    let activeWorkflowPhase: CollaborationWorkflowPhase | undefined;
     const dispatch: CollaborationDispatch = async (participant, request, signal) => {
         const participantId = getCollaborationParticipantId(participant);
         const participantFileState = await captureSharedFileContentSnapshot();
@@ -943,6 +995,13 @@ export class ClaudianView extends ItemView {
             sourceMessageId: assistantMessage.id,
             deliberationId: activeDeliberationId,
             deliberationPhase: activeDeliberationPhase,
+            workflow: workflow && activeWorkflowPhase
+              ? {
+                id: workflow.id,
+                deliberationId: workflow.deliberationId,
+                phase: activeWorkflowPhase,
+              }
+              : undefined,
           };
           await this.plugin.storage.rooms.appendEvent(room.id, assistantEvent);
           room.events.push(structuredClone(assistantEvent));
@@ -997,9 +1056,213 @@ export class ClaudianView extends ItemView {
         };
     };
 
+    if (workflow) {
+      const participantIds = routableParticipantIds;
+      const usageBaseline = new Map(participantIds.map((participantId) => {
+        const participant = room.participants.find(candidate => (
+          getCollaborationParticipantId(candidate) === participantId
+        ));
+        const tab = participant && this.tabManager?.getAllTabs().find(candidate => (
+          candidate.conversationId === participant.conversationId
+        ));
+        const persistedUsage = participant
+          ? this.plugin.getConversationSync(participant.conversationId)?.usage
+          : undefined;
+        const priorWorkflowUsage = [...room.events].reverse()
+          .flatMap(event => event.resourceUsage ?? [])
+          .find(usage => usage.participantId === participantId);
+        return [
+          participantId,
+          tab?.state.usage?.contextTokens
+            ?? persistedUsage?.contextTokens
+            ?? priorWorkflowUsage?.contextTokens
+            ?? 0,
+        ] as const;
+      }));
+      const runWorkflowPhase = async (
+        phase: Exclude<CollaborationWorkflowPhase, 'checkpoint'>,
+        recipients: string[],
+        strategy: 'parallel' | 'sequential',
+        prepareContent: (participantId: string) => string,
+      ): Promise<CollaborationEvent> => {
+        activeDeliberationId = undefined;
+        activeDeliberationPhase = undefined;
+        activeWorkflowPhase = phase;
+        const phaseTurn = await this.collaborationCoordinator.send(room, {
+          content: `Autonomous ${phase} phase`,
+          recipientIds: recipients,
+          strategy,
+          eventAuthorId: 'system',
+          eventKind: 'system',
+          eventMetadata: {
+            workflow: {
+              id: workflow.id,
+              deliberationId: workflow.deliberationId,
+              phase,
+            },
+          },
+          prepareContent: participant => prepareContent(
+            getCollaborationParticipantId(participant),
+          ),
+          dispatch,
+        });
+        room.events.push(structuredClone(phaseTurn.event));
+        for (const participantId of recipients) {
+          this.activeCollaborationDeliveries.set(
+            this.getCollaborationDeliveryKey(room.id, participantId),
+            phaseTurn.event.id,
+          );
+        }
+        this.refreshCollaborationTimelines(room.id);
+        await phaseTurn.completion;
+        for (const participantId of recipients) {
+          this.activeCollaborationDeliveries.delete(
+            this.getCollaborationDeliveryKey(room.id, participantId),
+          );
+        }
+        this.refreshCollaborationTimelines(room.id);
+        return phaseTurn.event;
+      };
+      const formatOutputs = (phase: CollaborationWorkflowPhase): string => room.events
+        .filter(event => (
+          event.workflow?.id === workflow.id
+          && event.workflow.phase === phase
+          && event.authorId !== 'system'
+          && event.authorId !== 'user'
+        ))
+        .map(event => {
+          const participant = room.participants.find(candidate => (
+            getCollaborationParticipantId(candidate) === event.authorId
+          ));
+          return `[${participant?.label ?? event.authorId}]: ${event.content}`;
+        })
+        .join('\n\n');
+      const readOnlyExecution = isReadOnlyCollaborationPlan(
+        `${workflow.originalGoal}\n${workflow.approvedSynthesis}`,
+      );
+      const activeParticipantLabels = room.participants
+        .filter(participant => participantIds.includes(
+          getCollaborationParticipantId(participant),
+        ))
+        .map(participant => (
+          participant.label ?? getCollaborationParticipantId(participant)
+        ));
+      const availabilityAdaptation = participantIds.length < room.participants.length
+        ? `${activeParticipantLabels[0]} is authorized to cover responsibilities assigned to participants omitted by quota-preservation or availability policy. Treat that coverage as part of the approved runtime plan, not as scope overreach.`
+        : undefined;
+      const executionEvent = await runWorkflowPhase(
+        'execution',
+        participantIds,
+        readOnlyExecution ? 'parallel' : 'sequential',
+        participantId => buildCollaborationExecutionInstruction(
+          room,
+          participantId,
+          workflow.originalGoal,
+          workflow.approvedSynthesis,
+          activeParticipantLabels,
+          participantId === participantIds[0]
+            && participantIds.length < room.participants.length,
+        ),
+      );
+      let workflowNeedsAttention = Object.values(executionEvent.delivery).some(delivery => (
+        delivery.status !== 'completed'
+      ));
+      if (!workflowNeedsAttention) {
+        const executionOutputs = formatOutputs('execution');
+        const reviewEvent = await runWorkflowPhase(
+          'review',
+          participantIds,
+          'parallel',
+          participantId => buildCollaborationReviewInstruction(
+            room,
+            participantId,
+            workflow.originalGoal,
+            workflow.approvedSynthesis,
+            executionOutputs,
+            availabilityAdaptation,
+          ),
+        );
+        workflowNeedsAttention = Object.values(reviewEvent.delivery).some(delivery => (
+          delivery.status !== 'completed'
+        ));
+        const verifierId = workflowNeedsAttention ? undefined : participantIds.at(-1);
+        if (verifierId) {
+          const verificationEvent = await runWorkflowPhase(
+            'verification',
+            [verifierId],
+            'sequential',
+            participantId => buildCollaborationVerificationInstruction(
+              room,
+              participantId,
+              workflow.originalGoal,
+              workflow.approvedSynthesis,
+              executionOutputs,
+              formatOutputs('review'),
+              availabilityAdaptation,
+            ),
+          );
+          workflowNeedsAttention = Object.values(verificationEvent.delivery).some(delivery => (
+            delivery.status !== 'completed'
+          ));
+        }
+      }
+      const verificationOutput = formatOutputs('verification');
+      const ready = !workflowNeedsAttention
+        && /^CHECKPOINT:\s*READY\b/im.test(verificationOutput);
+      const checkpointEvent: CollaborationEvent = {
+        id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        kind: 'system',
+        authorId: 'system',
+        recipientIds: ['user'],
+        content: ready
+          ? 'Human approval checkpoint: execution and cross-review completed. Review the evidence and approve the result or request changes.'
+          : workflowNeedsAttention
+            ? 'Human review required: the workflow produced a conflict, failure, or cancellation. Resolve pending items before continuing.'
+            : 'Human review required: verification found unresolved changes.',
+        createdAt: Date.now(),
+        delivery: {},
+        workflow: {
+          id: workflow.id,
+          deliberationId: workflow.deliberationId,
+          phase: 'checkpoint',
+        },
+        resourceUsage: participantIds.map((participantId) => {
+          const participant = room.participants.find(candidate => (
+            getCollaborationParticipantId(candidate) === participantId
+          ));
+          const tab = participant && this.tabManager?.getAllTabs().find(candidate => (
+            candidate.conversationId === participant.conversationId
+          ));
+          const usage = tab?.state.usage ?? (participant
+            ? this.plugin.getConversationSync(participant.conversationId)?.usage
+            : undefined);
+          const contextTokens = usage?.contextTokens ?? 0;
+          return {
+            participantId,
+            contextTokens,
+            contextPercent: usage?.percentage ?? 0,
+            contextTokenDelta: Math.max(
+              0,
+              contextTokens - (usageBaseline.get(participantId) ?? 0),
+            ),
+            turns: room.events.filter(event => (
+              event.workflow?.id === workflow.id
+              && event.authorId === 'system'
+              && participantId in event.delivery
+            )).length,
+            weeklyUsagePercent: participant?.resourcePolicy?.weeklyUsagePercent,
+          };
+        }),
+      };
+      await this.plugin.storage.rooms.appendEvent(room.id, checkpointEvent);
+      room.events.push(checkpointEvent);
+      this.refreshCollaborationTimelines(room.id);
+      return true;
+    }
+
     if (discussionMode === 'deliberation') {
       const deliberationId = `deliberation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const allParticipantIds = room.participants.map(getCollaborationParticipantId);
+      const allParticipantIds = routableParticipantIds;
       const synthesizerId = allParticipantIds.at(-1);
       const runPhase = async (
         phase: CollaborationDeliberationPhase,
@@ -1018,11 +1281,12 @@ export class ClaudianView extends ItemView {
           eventAuthorId: phase === 'position' ? 'user' : 'system',
           eventKind: phase === 'position' ? 'message' : 'system',
           eventMetadata: { deliberationId, deliberationPhase: phase },
-          prepareContent: () => buildDeliberationInstruction(
+          prepareContent: participant => buildDeliberationInstruction(
             room,
             phase,
             collaborationTurn.content,
             deliberationId,
+            getCollaborationParticipantId(participant),
           ),
           dispatch,
         });
@@ -1064,20 +1328,42 @@ export class ClaudianView extends ItemView {
         deliberationId,
         allParticipantIds,
       );
+      const synthesisEventId = [...room.events].reverse().find(event => (
+        event.deliberationId === deliberationId
+        && event.deliberationPhase === 'synthesis'
+        && event.authorId !== 'system'
+      ))?.id;
+      const outcomeStatus = consensus.approved
+        ? consensus.concerns.length > 0
+          ? 'approved-with-concerns'
+          : 'unanimous'
+        : 'rejected';
       const finalEvent: CollaborationEvent = {
         id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         kind: 'system',
         authorId: 'system',
         recipientIds: ['user'],
         content: consensus.approved
-          ? 'Consensus verified: every participant explicitly approved the synthesis.'
+          ? consensus.concerns.length > 0
+            ? `Approved with non-blocking concerns from: ${consensus.concerns.join(', ')}.`
+            : 'Unanimous approval: every participant explicitly approved the synthesis.'
           : `No consensus. Objections preserved from: ${
-            consensus.objections.length > 0 ? consensus.objections.join(', ') : 'missing ratifications'
+            consensus.objections.length > 0
+              ? consensus.objections.join(', ')
+              : consensus.missing.join(', ') || 'missing ratifications'
           }.`,
         createdAt: Date.now(),
         delivery: {},
         deliberationId,
         deliberationPhase: 'ratification',
+        deliberationOutcome: {
+          status: outcomeStatus,
+          approvals: consensus.approvals,
+          objections: consensus.objections,
+          concerns: consensus.concerns,
+          missing: consensus.missing,
+          synthesisEventId,
+        },
       };
       await this.plugin.storage.rooms.appendEvent(room.id, finalEvent);
       room.events.push(finalEvent);
@@ -1219,6 +1505,17 @@ export class ClaudianView extends ItemView {
             getCollaborationParticipantId(participant),
             participant.label ?? ProviderRegistry.getProviderDisplayName(participant.providerId),
           ])),
+          participantResourcePolicies: Object.fromEntries(room.participants.map(participant => [
+            getCollaborationParticipantId(participant),
+            participant.resourcePolicy,
+          ])),
+          participantUsageSnapshots: Object.fromEntries(room.participants.map((participant) => {
+            const participantId = getCollaborationParticipantId(participant);
+            const usage = [...room.events].reverse()
+              .flatMap(event => event.resourceUsage ?? [])
+              .find(candidate => candidate.participantId === participantId);
+            return [participantId, usage];
+          })),
           plugin: this.plugin,
           roomId,
           discussionMode: room.discussionMode ?? 'parallel',
@@ -1337,6 +1634,66 @@ export class ClaudianView extends ItemView {
             );
             new Notice(`${providerLabel} proposal applied.`);
           },
+          onStartApprovedPlan: async (deliberationId) => {
+            await this.startApprovedCollaborationPlan(tab.id, roomId, deliberationId);
+          },
+          onRetryApprovedPlan: async (deliberationId) => {
+            await this.startApprovedCollaborationPlan(
+              tab.id,
+              roomId,
+              deliberationId,
+              true,
+            );
+          },
+          onApproveWorkflow: async (workflowId, deliberationId) => {
+            await this.appendCollaborationWorkflowDecision(
+              roomId,
+              workflowId,
+              deliberationId,
+              'approved',
+              'Result approved by the user. Autonomous workflow complete.',
+            );
+          },
+          onRequestWorkflowChanges: async (workflowId, deliberationId) => {
+            await this.appendCollaborationWorkflowDecision(
+              roomId,
+              workflowId,
+              deliberationId,
+              'changes-requested',
+              'The user requested changes. The workflow is paused for direction.',
+            );
+            tab.dom.inputEl.value = '@all Changes requested: ';
+            tab.dom.inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+            tab.dom.inputEl.focus();
+          },
+          onEditResourcePolicy: (participantId) => {
+            const participant = room.participants.find(candidate => (
+              getCollaborationParticipantId(candidate) === participantId
+            ));
+            if (!participant) return;
+            new CollaborationResourcePolicyModal(
+              this.plugin,
+              participant.label ?? ProviderRegistry.getProviderDisplayName(
+                participant.providerId,
+              ),
+              participant.resourcePolicy,
+              (policy) => {
+                void this.plugin.storage.rooms.updateParticipantResourcePolicy(
+                  roomId,
+                  participantId,
+                  policy,
+                )
+                  .then(() => this.reconcileCollaborationTimelines())
+                  .catch((error) => {
+                    new Notice(
+                      error instanceof Error
+                        ? error.message
+                        : 'Could not update usage policy.',
+                    );
+                  });
+              },
+            ).open();
+          },
           onReview: async (reviewerId, sourceProviderId, content) => {
             const sourceParticipant = room.participants.find(participant => (
               getCollaborationParticipantId(participant) === sourceProviderId
@@ -1392,6 +1749,85 @@ export class ClaudianView extends ItemView {
       content,
       createdAt: Date.now(),
       delivery: {},
+    });
+    this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async startApprovedCollaborationPlan(
+    originTabId: TabId,
+    roomId: string,
+    deliberationId: string,
+    allowRetry = false,
+  ): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room) throw new Error('Collaboration room not found');
+    const outcomeEvent = [...room.events].reverse().find(event => (
+      event.deliberationId === deliberationId && event.deliberationOutcome
+    ));
+    if (
+      !outcomeEvent?.deliberationOutcome
+      || outcomeEvent.deliberationOutcome.status === 'rejected'
+    ) {
+      throw new Error('The plan is not approved');
+    }
+    if (
+      !allowRetry
+      && room.events.some(event => event.workflow?.deliberationId === deliberationId)
+    ) {
+      new Notice('This approved plan has already started.');
+      return;
+    }
+    const synthesisEvent = room.events.find(event => (
+      event.id === outcomeEvent.deliberationOutcome?.synthesisEventId
+    )) ?? [...room.events].reverse().find(event => (
+      event.deliberationId === deliberationId
+      && event.deliberationPhase === 'synthesis'
+      && event.authorId !== 'system'
+    ));
+    const originalEvent = room.events.find(event => (
+      event.deliberationId === deliberationId
+      && event.deliberationPhase === 'position'
+      && event.authorId === 'user'
+    ));
+    if (!synthesisEvent || !originalEvent) {
+      throw new Error('Approved plan context is incomplete');
+    }
+    const workflowId = `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    new Notice('Approved plan started. The room will stop at a human review checkpoint.');
+    await this.routeCollaborationMessage(
+      originTabId,
+      originalEvent.content,
+      undefined,
+      {
+        id: workflowId,
+        deliberationId,
+        originalGoal: originalEvent.content,
+        approvedSynthesis: synthesisEvent.content,
+      },
+    );
+  }
+
+  private async appendCollaborationWorkflowDecision(
+    roomId: string,
+    workflowId: string,
+    deliberationId: string,
+    decision: 'approved' | 'changes-requested',
+    content: string,
+  ): Promise<void> {
+    await this.plugin.storage.rooms.appendEvent(roomId, {
+      id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      kind: 'system',
+      authorId: 'system',
+      recipientIds: ['user'],
+      content,
+      createdAt: Date.now(),
+      delivery: {},
+      workflow: {
+        id: workflowId,
+        deliberationId,
+        phase: 'checkpoint',
+      },
+      workflowDecision: decision,
     });
     this.refreshCollaborationTimelines(roomId);
   }

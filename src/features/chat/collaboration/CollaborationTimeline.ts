@@ -4,6 +4,8 @@ import { MarkdownRenderer, setIcon } from 'obsidian';
 import type {
   CollaborationDiscussionMode,
   CollaborationEvent,
+  CollaborationParticipantResourcePolicy,
+  CollaborationResourceUsageSnapshot,
   CollaborationRoom,
   ProviderId,
 } from '../../../core/types';
@@ -18,6 +20,8 @@ interface CollaborationTimelineOptions {
   hostTab: TabData;
   participantTabs: TabData[];
   participantLabels: Record<string, string>;
+  participantResourcePolicies: Record<string, CollaborationParticipantResourcePolicy | undefined>;
+  participantUsageSnapshots: Record<string, CollaborationResourceUsageSnapshot | undefined>;
   plugin: FeatureHost;
   roomId: string;
   discussionMode: CollaborationDiscussionMode;
@@ -38,6 +42,11 @@ interface CollaborationTimelineOptions {
     providerId: ProviderId,
     selectedHunks: Record<string, string[]>,
   ) => Promise<void>;
+  onStartApprovedPlan: (deliberationId: string) => Promise<void>;
+  onRetryApprovedPlan: (deliberationId: string) => Promise<void>;
+  onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
+  onRequestWorkflowChanges: (workflowId: string, deliberationId: string) => Promise<void>;
+  onEditResourcePolicy: (participantId: ProviderId) => void;
   onReview: (
     reviewerId: ProviderId,
     sourceProviderId: ProviderId,
@@ -63,6 +72,7 @@ export class CollaborationTimeline {
   private readonly recoveryEl: HTMLElement;
   private readonly statusEls = new Map<ProviderId, HTMLElement>();
   private readonly stopEls = new Map<ProviderId, HTMLButtonElement>();
+  private readonly resourceEls = new Map<ProviderId, HTMLButtonElement>();
   private readonly nativeMessagesWrapper: HTMLElement | null;
   private readonly cleanups: Array<() => void> = [];
   private discussionMode: CollaborationDiscussionMode;
@@ -216,11 +226,16 @@ export class CollaborationTimeline {
     });
     const allButton = railEl.createEl('button', {
       cls: 'claudian-collaboration-recipient is-selected',
-      text: 'All',
+      text: Object.values(this.options.participantResourcePolicies).some(policy => (
+        policy && policy.mode !== 'active'
+      ))
+        ? 'Available'
+        : 'All',
       attr: {
         type: 'button',
         'aria-pressed': 'true',
         'data-provider': 'all',
+        'aria-label': 'Send to all available agents',
       },
     });
     allButton.addEventListener('click', () => this.selectRecipient('all', allButton));
@@ -253,6 +268,21 @@ export class CollaborationTimeline {
       setIcon(stopButton, 'square');
       stopButton.addEventListener('click', () => this.options.onStop(participantId));
       this.stopEls.set(participantId, stopButton);
+
+      const policy = this.options.participantResourcePolicies[participantId];
+      const resourceButton = railEl.createEl('button', {
+        cls: 'claudian-collaboration-resource',
+        text: this.getResourceLabel(policy),
+        attr: {
+          type: 'button',
+          'aria-label': `Edit usage policy for ${this.getParticipantLabel(participantId)}`,
+          'data-provider': participantId,
+        },
+      });
+      resourceButton.addEventListener('click', () => (
+        this.options.onEditResourcePolicy(participantId)
+      ));
+      this.resourceEls.set(participantId, resourceButton);
     }
   }
 
@@ -318,9 +348,11 @@ export class CollaborationTimeline {
           ? 'You'
           : event.authorId === 'system' && event.deliberationPhase
             ? `Deliberation · ${event.deliberationPhase}`
+            : event.authorId === 'system' && event.workflow
+              ? `Workflow · ${event.workflow.phase}`
             : [
               this.getParticipantLabel(event.authorId),
-              event.deliberationPhase,
+              event.deliberationPhase ?? event.workflow?.phase,
             ].filter(Boolean).join(' · '),
       });
       const contentEl = messageEl.createDiv({
@@ -343,6 +375,141 @@ export class CollaborationTimeline {
         '',
         this.options.component,
       );
+      if (event.deliberationOutcome && event.deliberationId) {
+        const outcome = event.deliberationOutcome;
+        const statusEl = messageEl.createDiv({
+          cls: 'claudian-collaboration-outcome',
+          attr: {
+            'data-status': outcome.status,
+            'aria-label': 'Deliberation outcome',
+          },
+        });
+        statusEl.createSpan({
+          cls: 'claudian-collaboration-outcome-status',
+          text: outcome.status === 'unanimous'
+            ? 'Unanimous'
+            : outcome.status === 'approved-with-concerns'
+              ? 'Approved with concerns'
+              : 'Not approved',
+        });
+        statusEl.createSpan({
+          cls: 'claudian-collaboration-outcome-votes',
+          text: `${outcome.approvals.length}/${
+            new Set([
+              ...outcome.approvals,
+              ...outcome.objections,
+              ...outcome.missing,
+            ]).size
+          } approvals`,
+        });
+        const workflowStarted = room.events.some(candidate => (
+          candidate.workflow?.deliberationId === event.deliberationId
+        ));
+        if (outcome.status !== 'rejected' && !workflowStarted) {
+          const startButton = statusEl.createEl('button', {
+            cls: 'claudian-collaboration-start-plan',
+            text: 'Start approved plan',
+            attr: {
+              type: 'button',
+              'aria-label': 'Start autonomous execution of the approved plan',
+            },
+          });
+          startButton.addEventListener('click', () => {
+            startButton.disabled = true;
+            startButton.setText('Starting…');
+            void this.options.onStartApprovedPlan(event.deliberationId!)
+              .catch(() => {
+                startButton.disabled = false;
+                startButton.setText('Start approved plan');
+              });
+          });
+        }
+      }
+      if (event.workflow?.phase === 'checkpoint' && !event.workflowDecision) {
+        if (event.resourceUsage?.length) {
+          const usageEl = messageEl.createDiv({
+            cls: 'claudian-collaboration-workflow-usage',
+            attr: { 'aria-label': 'Workflow token usage' },
+          });
+          for (const usage of event.resourceUsage) {
+            usageEl.createSpan({
+              text: `${this.getParticipantLabel(usage.participantId)}: +${
+                usage.contextTokenDelta.toLocaleString()
+              } context tokens${
+                usage.turns !== undefined ? ` · ${usage.turns} turns` : ''
+              } · ${usage.contextPercent}% context${
+                usage.weeklyUsagePercent !== undefined
+                  ? ` · ${usage.weeklyUsagePercent}% week`
+                  : ''
+              }`,
+            });
+          }
+          usageEl.createSpan({
+            cls: 'claudian-collaboration-workflow-usage-note',
+            text: 'Monetary cost unavailable for subscription-backed accounts.',
+          });
+        }
+        const decided = room.events.some(candidate => (
+          candidate.workflow?.id === event.workflow?.id && candidate.workflowDecision
+        ));
+        if (!decided) {
+          const checkpointEl = messageEl.createDiv({
+            cls: 'claudian-collaboration-checkpoint',
+            attr: { 'aria-label': 'Human approval checkpoint' },
+          });
+          const approveButton = checkpointEl.createEl('button', {
+            cls: 'claudian-collaboration-checkpoint-approve',
+            text: 'Approve result',
+            attr: { type: 'button' },
+          });
+          approveButton.addEventListener('click', () => {
+            approveButton.disabled = true;
+            void this.options.onApproveWorkflow(
+              event.workflow!.id,
+              event.workflow!.deliberationId,
+            ).catch(() => { approveButton.disabled = false; });
+          });
+          const changesButton = checkpointEl.createEl('button', {
+            cls: 'claudian-collaboration-checkpoint-changes',
+            text: 'Request changes',
+            attr: { type: 'button' },
+          });
+          changesButton.addEventListener('click', () => {
+            changesButton.disabled = true;
+            void this.options.onRequestWorkflowChanges(
+              event.workflow!.id,
+              event.workflow!.deliberationId,
+            ).catch(() => { changesButton.disabled = false; });
+          });
+        }
+      }
+      if (event.workflowDecision === 'changes-requested' && event.workflow) {
+        const workflow = event.workflow;
+        const laterWorkflow = room.events.some(candidate => (
+          candidate.workflow?.deliberationId === workflow.deliberationId
+          && candidate.workflow?.id !== workflow.id
+          && candidate.createdAt > event.createdAt
+        ));
+        if (!laterWorkflow) {
+          const retryPlanButton = messageEl.createEl('button', {
+            cls: 'claudian-collaboration-retry-plan',
+            text: 'Retry approved plan',
+            attr: {
+              type: 'button',
+              'aria-label': 'Retry the approved plan with current agent availability',
+            },
+          });
+          retryPlanButton.addEventListener('click', () => {
+            retryPlanButton.disabled = true;
+            retryPlanButton.setText('Starting…');
+            void this.options.onRetryApprovedPlan(workflow.deliberationId)
+              .catch(() => {
+                retryPlanButton.disabled = false;
+                retryPlanButton.setText('Retry approved plan');
+              });
+          });
+        }
+      }
       if (event.authorId === 'user' && Object.keys(event.delivery).length > 0) {
         const deliveryEl = messageEl.createDiv({
           cls: 'claudian-collaboration-delivery',
@@ -632,7 +799,47 @@ export class CollaborationTimeline {
       stopButton?.toggleClass('claudian-hidden', !canStop);
       stopButton?.setAttribute('aria-hidden', canStop ? 'false' : 'true');
       if (stopButton) stopButton.disabled = !canStop;
+      const resourceEl = this.resourceEls.get(participantId);
+      const policy = this.options.participantResourcePolicies[participantId];
+      const contextUsage = tab.state.usage;
+      const persistedUsage = this.options.participantUsageSnapshots[participantId];
+      if (resourceEl) {
+        resourceEl.setText(this.getResourceLabel(
+          policy,
+          contextUsage?.percentage ?? persistedUsage?.contextPercent,
+        ));
+        resourceEl.dataset.mode = policy?.mode ?? 'active';
+        resourceEl.setAttribute(
+          'title',
+          [
+            policy?.weeklyUsagePercent !== undefined
+              ? `${policy.weeklyUsagePercent}% user-reported weekly usage`
+              : 'Weekly usage not set',
+            contextUsage
+              ? `${contextUsage.contextTokens.toLocaleString()} context tokens`
+              : persistedUsage
+                ? `${persistedUsage.contextTokens.toLocaleString()} context tokens (last workflow)`
+                : 'Context usage unavailable',
+          ].join(' · '),
+        );
+      }
     }
+  }
+
+  private getResourceLabel(
+    policy: CollaborationParticipantResourcePolicy | undefined,
+    contextPercent?: number,
+  ): string {
+    const usage = policy?.weeklyUsagePercent !== undefined
+      ? `${policy.weeklyUsagePercent}% week`
+      : contextPercent !== undefined
+        ? `${contextPercent}% context`
+        : 'Usage';
+    return policy?.mode === 'preserve'
+      ? `${usage} · preserve`
+      : policy?.mode === 'unavailable'
+        ? `${usage} · unavailable`
+        : usage;
   }
 
   private getTabParticipantId(tab: TabData): string {

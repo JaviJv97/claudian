@@ -171,6 +171,25 @@ export class CollaborationRoomRepository {
     });
   }
 
+  async updateParticipantResourcePolicy(
+    roomId: string,
+    participantId: string,
+    policy: CollaborationParticipant['resourcePolicy'],
+    now = Date.now(),
+  ): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      const participant = room.participants.find(candidate => (
+        getCollaborationParticipantId(candidate) === participantId
+      ));
+      if (!participant) {
+        throw new Error(`Collaboration participant not found: ${participantId}`);
+      }
+      participant.resourcePolicy = policy ? { ...policy } : undefined;
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
   async updateParticipantCursor(
     roomId: string,
     participantId: string,

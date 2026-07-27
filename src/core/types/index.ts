@@ -15,6 +15,7 @@ export {
 export {
   type CollaborationAttachment,
   type CollaborationAuthorId,
+  type CollaborationDeliberationOutcome,
   type CollaborationDeliberationPhase,
   type CollaborationDelivery,
   type CollaborationDeliveryStatus,
@@ -23,8 +24,12 @@ export {
   type CollaborationFileProposal,
   type CollaborationMembership,
   type CollaborationParticipant,
+  type CollaborationParticipantResourcePolicy,
   type CollaborationRecipientId,
+  type CollaborationResourceUsageSnapshot,
   type CollaborationRoom,
+  type CollaborationWorkflowMetadata,
+  type CollaborationWorkflowPhase,
 } from './collaboration';
 export { type ProviderId } from './provider';
 

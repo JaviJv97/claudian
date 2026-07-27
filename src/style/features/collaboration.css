@@ -90,6 +90,34 @@
   color: var(--text-muted);
 }
 
+.claudian-collaboration-resource {
+  min-height: 28px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.claudian-collaboration-resource[data-mode="preserve"] {
+  border-color: var(--color-yellow);
+  color: var(--text-warning);
+}
+
+.claudian-collaboration-resource[data-mode="unavailable"] {
+  border-color: var(--background-modifier-border);
+  color: var(--text-error);
+}
+
+.claudian-collaboration-resource:hover,
+.claudian-collaboration-resource:focus-visible {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
 .claudian-collaboration-recipient {
   display: inline-flex;
   align-items: center;
@@ -228,6 +256,97 @@
 
 .claudian-collaboration-delivery-item[data-status="resolved"] {
   color: var(--text-success);
+}
+
+.claudian-collaboration-outcome {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.claudian-collaboration-outcome-status {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.claudian-collaboration-outcome[data-status="rejected"]
+  .claudian-collaboration-outcome-status {
+  color: var(--text-error);
+}
+
+.claudian-collaboration-outcome-votes {
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.claudian-collaboration-start-plan {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 5px 10px;
+  border-radius: var(--radius-s);
+  font-size: 11px;
+}
+
+.claudian-collaboration-retry-plan {
+  min-height: 36px;
+  margin-top: 10px;
+  padding: 6px 11px;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-checkpoint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.claudian-collaboration-workflow-usage {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 8px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.claudian-collaboration-workflow-usage-note {
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+}
+
+.claudian-collaboration-checkpoint button {
+  min-height: 36px;
+  padding: 6px 11px;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-checkpoint-changes {
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.claudian-collaboration-checkpoint-changes:hover,
+.claudian-collaboration-checkpoint-changes:focus-visible {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 .claudian-collaboration-recovery {

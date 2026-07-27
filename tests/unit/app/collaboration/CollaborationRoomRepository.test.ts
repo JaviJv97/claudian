@@ -254,6 +254,31 @@ describe('CollaborationRoomRepository', () => {
     expect(room.updatedAt).toBe(120);
   });
 
+  it('persists participant quota-preservation policy', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [
+        { id: 'personal', providerId: 'claude', conversationId: 'conversation-personal' },
+      ],
+      now: 100,
+    });
+
+    const room = await repository.updateParticipantResourcePolicy(
+      'room-1',
+      'personal',
+      { mode: 'preserve', weeklyUsagePercent: 96 },
+      110,
+    );
+
+    expect(room.participants[0].resourcePolicy).toEqual({
+      mode: 'preserve',
+      weeklyUsagePercent: 96,
+    });
+    expect(room.updatedAt).toBe(110);
+  });
+
   it.each(['', '../escape', 'nested/room', '/absolute'])(
     'rejects unsafe room id %p',
     async (id) => {

@@ -20,6 +20,31 @@ export type CollaborationDeliberationPhase =
   | 'critique'
   | 'synthesis'
   | 'ratification';
+export type CollaborationWorkflowPhase = 'execution' | 'review' | 'verification' | 'checkpoint';
+
+export interface CollaborationDeliberationOutcome {
+  status: 'unanimous' | 'approved-with-concerns' | 'rejected';
+  approvals: string[];
+  objections: string[];
+  concerns: string[];
+  missing: string[];
+  synthesisEventId?: string;
+}
+
+export interface CollaborationWorkflowMetadata {
+  id: string;
+  deliberationId: string;
+  phase: CollaborationWorkflowPhase;
+}
+
+export interface CollaborationResourceUsageSnapshot {
+  participantId: string;
+  contextTokens: number;
+  contextPercent: number;
+  contextTokenDelta: number;
+  turns?: number;
+  weeklyUsagePercent?: number;
+}
 
 export interface CollaborationMembership {
   roomId: string;
@@ -34,6 +59,13 @@ export interface CollaborationParticipant {
   label?: string;
   runtimeProfileId?: string;
   conversationId: string;
+  resourcePolicy?: CollaborationParticipantResourcePolicy;
+}
+
+export interface CollaborationParticipantResourcePolicy {
+  mode: 'active' | 'preserve' | 'unavailable';
+  /** User-reported provider quota utilization; providers do not expose this reliably. */
+  weeklyUsagePercent?: number;
 }
 
 export interface CollaborationDelivery {
@@ -84,6 +116,10 @@ export interface CollaborationEvent {
   sourceMessageId?: string;
   deliberationId?: string;
   deliberationPhase?: CollaborationDeliberationPhase;
+  deliberationOutcome?: CollaborationDeliberationOutcome;
+  workflow?: CollaborationWorkflowMetadata;
+  workflowDecision?: 'approved' | 'changes-requested';
+  resourceUsage?: CollaborationResourceUsageSnapshot[];
 }
 
 export interface CollaborationRoom {
