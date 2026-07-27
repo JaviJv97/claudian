@@ -679,6 +679,12 @@ export class CollaborationTimeline {
       text: queue.status,
       attr: { 'data-status': queue.status },
     });
+    const queueContextTokens = queue.tasks.reduce((total, task) => (
+      total
+      + [task.evidence, ...(task.evidenceHistory ?? [])]
+        .flatMap(evidence => evidence?.resourceUsage ?? [])
+        .reduce((taskTotal, usage) => taskTotal + usage.contextTokenDelta, 0)
+    ), 0);
     panel.createDiv({
       cls: 'claudian-collaboration-work-queue-summary',
       text: `${queue.tasks.filter(task => task.status === 'ready').length} ready · ${
@@ -687,7 +693,9 @@ export class CollaborationTimeline {
         room.workQueueHistory?.length
           ? ` · ${room.workQueueHistory.length} archived`
           : ''
-      }`,
+      }${queueContextTokens > 0
+        ? ` · +${queueContextTokens.toLocaleString()} context tokens`
+        : ''}`,
     });
     if (queue.status === 'approved' || queue.status === 'paused') {
       const pause = header.createEl('button', {
@@ -998,6 +1006,21 @@ export class CollaborationTimeline {
                 usage.contextTokenDelta.toLocaleString()
               } tokens`
             )).join(' · '),
+          });
+        }
+      }
+      if (task.evidenceHistory?.length) {
+        const history = item.createEl('details', {
+          cls: 'claudian-collaboration-work-task-evidence',
+        });
+        history.createEl('summary', {
+          text: `${task.evidenceHistory.length} prior attempt${
+            task.evidenceHistory.length === 1 ? '' : 's'
+          }`,
+        });
+        for (const [index, evidence] of task.evidenceHistory.entries()) {
+          history.createDiv({
+            text: `Attempt ${index + 1}: ${evidence.summary}`,
           });
         }
       }

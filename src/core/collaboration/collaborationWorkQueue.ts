@@ -448,6 +448,11 @@ export function transitionCollaborationTask(
         .flatMap(scope => candidate.fileScopes.map(other => scopesOverlap(scope, other)))
         .filter((scope): scope is string => scope !== null));
     if (conflicts.length > 0) throw new Error(`${task.id} overlaps an active file scope`);
+    if (task.evidence) {
+      task.evidenceHistory ??= [];
+      task.evidenceHistory.push(structuredClone(task.evidence));
+      delete task.evidence;
+    }
     task.attempts += 1;
   }
   if (nextStatus === 'ready' && task.attempts >= task.maxAttempts) {

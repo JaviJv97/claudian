@@ -273,6 +273,30 @@ describe('collaboration work queue', () => {
     })).toThrow('exhausted its retry budget');
   });
 
+  it('archives stale evidence before a retry starts', () => {
+    const approved = approveCollaborationWorkQueue(queue(), participants, 20);
+    approved.tasks[0].status = 'failed';
+    approved.tasks[0].attempts = 1;
+    approved.tasks[0].evidence = {
+      summary: 'First attempt failed review.',
+      filesChanged: ['src/core/old.ts'],
+      acceptanceCriteriaMet: [],
+      verificationResults: [{ command: 'npm test', status: 'failed' }],
+    };
+    const ready = transitionCollaborationTask(approved, 'TASK-001', 'ready', {
+      actorId: 'codex',
+      now: 21,
+    });
+    const running = transitionCollaborationTask(ready, 'TASK-001', 'running', {
+      actorId: 'codex',
+      now: 22,
+    });
+
+    expect(running.tasks[0].evidence).toBeUndefined();
+    expect(running.tasks[0].evidenceHistory).toHaveLength(1);
+    expect(running.tasks[0].attempts).toBe(2);
+  });
+
   it('keeps final human approval distinct from reviewer completion', () => {
     const completed = queue();
     completed.status = 'completed';

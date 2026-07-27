@@ -70,6 +70,7 @@ export interface CollaborationWorkTask {
   attempts: number;
   maxAttempts: number;
   evidence?: CollaborationTaskEvidence;
+  evidenceHistory?: CollaborationTaskEvidence[];
   createdAt: number;
   updatedAt: number;
 }
