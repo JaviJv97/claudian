@@ -1,5 +1,13 @@
 # Office PC continuation
 
+## Collaboration UI redesign handoff
+
+The transcript-backed UI research, filesystem coverage audit, screenshot critique,
+proposed information architecture, and prioritized implementation plan are in
+[COLLABORATION-UI-RESEARCH.md](./COLLABORATION-UI-RESEARCH.md).
+
+Resume the UI milestone from that document before making further layout changes.
+
 This branch supports a safe room handoff between computers without copying
 provider credentials or treating machine-local provider session IDs as
 Claudian conversation IDs.
