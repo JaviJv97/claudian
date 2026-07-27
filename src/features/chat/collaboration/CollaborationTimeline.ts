@@ -49,6 +49,9 @@ interface CollaborationTimelineOptions {
   onStartApprovedPlan: (deliberationId: string) => Promise<void>;
   onCreateWorkQueue: (deliberationId: string) => Promise<void>;
   onApproveWorkQueue: () => Promise<void>;
+  onRunWorkTask: (taskId: string) => Promise<void>;
+  onRetryWorkTask: (taskId: string) => Promise<void>;
+  onSetWorkQueuePaused: (paused: boolean) => Promise<void>;
   onRetryApprovedPlan: (deliberationId: string) => Promise<void>;
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
   onRequestWorkflowChanges: (workflowId: string, deliberationId: string) => Promise<void>;
@@ -647,6 +650,18 @@ export class CollaborationTimeline {
         queue.tasks.filter(task => task.status === 'blocked').length
       } blocked · ${queue.tasks.filter(task => task.status === 'done').length} done`,
     });
+    if (queue.status === 'approved' || queue.status === 'paused') {
+      const pause = header.createEl('button', {
+        cls: 'claudian-collaboration-work-queue-pause',
+        text: queue.status === 'paused' ? 'Resume' : 'Pause',
+        attr: { type: 'button' },
+      });
+      pause.addEventListener('click', () => {
+        pause.disabled = true;
+        void this.options.onSetWorkQueuePaused(queue.status === 'approved')
+          .catch(() => { pause.disabled = false; });
+      });
+    }
     const list = panel.createDiv({ cls: 'claudian-collaboration-work-queue-list' });
     for (const task of queue.tasks) {
       const item = list.createDiv({
@@ -668,6 +683,57 @@ export class CollaborationTimeline {
           cls: 'claudian-collaboration-work-task-dependencies',
           text: `After ${task.dependsOn.join(', ')}`,
         });
+      }
+      if (
+        queue.status === 'approved'
+        && (task.status === 'ready' || task.status === 'failed')
+      ) {
+        const action = item.createEl('button', {
+          cls: 'claudian-collaboration-work-task-action',
+          text: task.status === 'ready' ? 'Run task' : 'Prepare retry',
+          attr: { type: 'button' },
+        });
+        action.addEventListener('click', () => {
+          action.disabled = true;
+          action.setText(task.status === 'ready' ? 'Starting…' : 'Preparing…');
+          const operation = task.status === 'ready'
+            ? this.options.onRunWorkTask(task.id)
+            : this.options.onRetryWorkTask(task.id);
+          void operation.catch(() => {
+            action.disabled = false;
+            action.setText(task.status === 'ready' ? 'Run task' : 'Prepare retry');
+          });
+        });
+      }
+      if (task.evidence) {
+        const details = item.createEl('details', {
+          cls: 'claudian-collaboration-work-task-evidence',
+        });
+        details.createEl('summary', { text: 'Evidence' });
+        details.createDiv({ text: task.evidence.summary });
+        details.createDiv({
+          text: task.evidence.verificationResults.map(result => (
+            `${result.status === 'passed' ? '✓' : '×'} ${result.command}`
+          )).join(' · '),
+        });
+        if (task.evidence.review) {
+          details.createDiv({
+            text: `${this.getParticipantLabel(task.evidence.review.reviewerId)}: ${
+              task.evidence.review.verdict
+            }${task.evidence.review.findings.length > 0
+              ? ` · ${task.evidence.review.findings.join('; ')}`
+              : ''}`,
+          });
+        }
+        if (task.evidence.resourceUsage?.length) {
+          details.createDiv({
+            text: task.evidence.resourceUsage.map(usage => (
+              `${this.getParticipantLabel(usage.participantId)} +${
+                usage.contextTokenDelta.toLocaleString()
+              } tokens`
+            )).join(' · '),
+          });
+        }
       }
     }
     if (queue.status === 'draft') {

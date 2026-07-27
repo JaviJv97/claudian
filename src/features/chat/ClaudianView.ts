@@ -20,6 +20,12 @@ import {
   getCollaborationParticipantId,
   resolveCollaborationTurn,
 } from '../../core/collaboration/collaborationRoom';
+import {
+  buildCollaborationTaskExecutionInstruction,
+  buildCollaborationTaskReviewInstruction,
+  parseCollaborationTaskEvidence,
+  parseCollaborationTaskReview,
+} from '../../core/collaboration/collaborationTaskWorkflow';
 import { buildCollaborationPrompt } from '../../core/collaboration/collaborationTranscript';
 import {
   buildCollaborationExecutionInstruction,
@@ -29,6 +35,8 @@ import {
 import {
   approveCollaborationWorkQueue,
   parseCollaborationTaskGraph,
+  setCollaborationWorkQueuePaused,
+  transitionCollaborationTask,
 } from '../../core/collaboration/collaborationWorkQueue';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
@@ -101,6 +109,7 @@ interface CollaborationWorkflowRoute {
   deliberationId: string;
   originalGoal: string;
   approvedSynthesis: string;
+  taskId?: string;
 }
 
 export class ClaudianView extends ItemView {
@@ -885,11 +894,21 @@ export class ClaudianView extends ItemView {
         `${preservedOverrides.join(', ')} is in preserve mode; the explicit mention overrides quota preservation.`,
       );
     }
-    const routableParticipantIds = getRoutableCollaborationParticipantIds(
-      room,
-      content,
-      Boolean(workflow),
-    );
+    const workflowTask = workflow?.taskId
+      ? room.workQueue?.tasks.find(task => task.id === workflow.taskId)
+      : undefined;
+    const routableParticipantIds = workflowTask
+      ? [workflowTask.ownerId, workflowTask.reviewerId].filter(participantId => (
+        room.participants.some(participant => (
+          getCollaborationParticipantId(participant) === participantId
+          && participant.resourcePolicy?.mode !== 'unavailable'
+        ))
+      ))
+      : getRoutableCollaborationParticipantIds(
+        room,
+        content,
+        Boolean(workflow),
+      );
     if (routableParticipantIds.length === 0) {
       new Notice('No available agents are eligible for this message.');
       return true;
@@ -1118,6 +1137,7 @@ export class ClaudianView extends ItemView {
               id: workflow.id,
               deliberationId: workflow.deliberationId,
               phase,
+              taskId: workflow.taskId,
             },
           },
           prepareContent: participant => prepareContent(
@@ -1156,6 +1176,129 @@ export class ClaudianView extends ItemView {
           return `[${participant?.label ?? event.authorId}]: ${event.content}`;
         })
         .join('\n\n');
+      if (workflow.taskId) {
+        const task = room.workQueue?.tasks.find(candidate => candidate.id === workflow.taskId);
+        if (!task || !room.workQueue) throw new Error(`Queue task not found: ${workflow.taskId}`);
+        const failTask = async (message: string): Promise<boolean> => {
+          const latest = await this.plugin.storage.rooms.get(room.id);
+          if (latest?.workQueue) {
+            const current = latest.workQueue.tasks.find(candidate => candidate.id === task.id);
+            if (current?.status === 'running' || current?.status === 'review') {
+              const failed = transitionCollaborationTask(
+                latest.workQueue,
+                task.id,
+                'failed',
+                { actorId: current.reviewerId },
+              );
+              await this.plugin.storage.rooms.updateWorkQueue(room.id, failed);
+            }
+          }
+          new Notice(message);
+          this.refreshCollaborationTimelines(room.id);
+          return true;
+        };
+        const executionEvent = await runWorkflowPhase(
+          'execution',
+          [task.ownerId],
+          'sequential',
+          () => buildCollaborationTaskExecutionInstruction(room, task),
+        );
+        if (executionEvent.delivery[task.ownerId]?.status !== 'completed') {
+          return failTask(`${task.id} execution did not complete.`);
+        }
+        const ownerOutput = [...room.events].reverse().find(event => (
+          event.workflow?.id === workflow.id
+          && event.workflow.phase === 'execution'
+          && event.authorId === task.ownerId
+        ))?.content;
+        let evidence;
+        try {
+          evidence = parseCollaborationTaskEvidence(ownerOutput ?? '');
+          const latest = await this.plugin.storage.rooms.get(room.id);
+          if (!latest?.workQueue) throw new Error('Work queue not found');
+          const inReview = transitionCollaborationTask(
+            latest.workQueue,
+            task.id,
+            'review',
+            { actorId: task.ownerId, evidence },
+          );
+          await this.plugin.storage.rooms.updateWorkQueue(room.id, inReview);
+          room.workQueue = structuredClone(inReview);
+          this.refreshCollaborationTimelines(room.id);
+        } catch (error) {
+          return failTask(error instanceof Error ? error.message : `${task.id} evidence failed`);
+        }
+        const reviewEvent = await runWorkflowPhase(
+          'review',
+          [task.reviewerId],
+          'sequential',
+          () => buildCollaborationTaskReviewInstruction(room, task, evidence),
+        );
+        if (reviewEvent.delivery[task.reviewerId]?.status !== 'completed') {
+          return failTask(`${task.id} review did not complete.`);
+        }
+        const reviewerOutput = [...room.events].reverse().find(event => (
+          event.workflow?.id === workflow.id
+          && event.workflow.phase === 'review'
+          && event.authorId === task.reviewerId
+        ))?.content;
+        try {
+          const review = parseCollaborationTaskReview(reviewerOutput ?? '');
+          const latest = await this.plugin.storage.rooms.get(room.id);
+          if (!latest?.workQueue) throw new Error('Work queue not found');
+          const next = transitionCollaborationTask(
+            latest.workQueue,
+            task.id,
+            review.verdict === 'approve' ? 'done' : 'failed',
+            { actorId: task.reviewerId },
+          );
+          const reviewedTask = next.tasks.find(candidate => candidate.id === task.id);
+          if (reviewedTask?.evidence) {
+            reviewedTask.evidence.review = {
+              reviewerId: task.reviewerId,
+              verdict: review.verdict,
+              findings: review.findings,
+              reviewedAt: Date.now(),
+            };
+            reviewedTask.evidence.resourceUsage = [task.ownerId, task.reviewerId].map(
+              (participantId) => {
+                const participant = room.participants.find(candidate => (
+                  getCollaborationParticipantId(candidate) === participantId
+                ));
+                const tab = participant && this.tabManager?.getAllTabs().find(candidate => (
+                  candidate.conversationId === participant.conversationId
+                ));
+                const contextTokens = tab?.state.usage?.contextTokens
+                  ?? (participant
+                    ? this.plugin.getConversationSync(participant.conversationId)?.usage
+                      ?.contextTokens
+                    : 0)
+                  ?? 0;
+                return {
+                  participantId,
+                  contextTokens,
+                  contextPercent: tab?.state.usage?.percentage ?? 0,
+                  contextTokenDelta: Math.max(
+                    0,
+                    contextTokens - (usageBaseline.get(participantId) ?? 0),
+                  ),
+                  weeklyUsagePercent: participant?.resourcePolicy?.weeklyUsagePercent,
+                };
+              },
+            );
+          }
+          await this.plugin.storage.rooms.updateWorkQueue(room.id, next);
+          new Notice(
+            review.verdict === 'approve'
+              ? `${task.id} approved. Dependencies were updated.`
+              : `${task.id} needs changes: ${review.findings.join('; ')}`,
+          );
+          this.refreshCollaborationTimelines(room.id);
+          return true;
+        } catch (error) {
+          return failTask(error instanceof Error ? error.message : `${task.id} review failed`);
+        }
+      }
       const readOnlyExecution = isReadOnlyCollaborationPlan(
         `${workflow.originalGoal}\n${workflow.approvedSynthesis}`,
       );
@@ -1821,6 +1964,15 @@ export class ClaudianView extends ItemView {
           onApproveWorkQueue: async () => {
             await this.approveCollaborationWorkQueue(roomId);
           },
+          onRunWorkTask: async (taskId) => {
+            await this.runCollaborationWorkTask(tab.id, roomId, taskId);
+          },
+          onRetryWorkTask: async (taskId) => {
+            await this.retryCollaborationWorkTask(roomId, taskId);
+          },
+          onSetWorkQueuePaused: async (paused) => {
+            await this.setCollaborationWorkQueuePaused(roomId, paused);
+          },
           onRetryApprovedPlan: async (deliberationId) => {
             await this.startApprovedCollaborationPlan(
               tab.id,
@@ -2038,6 +2190,105 @@ export class ClaudianView extends ItemView {
       new Notice(error instanceof Error ? error.message : 'Queue validation failed');
       throw error;
     }
+  }
+
+  private async runCollaborationWorkTask(
+    originTabId: TabId,
+    roomId: string,
+    taskId: string,
+  ): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    const task = room.workQueue.tasks.find(candidate => candidate.id === taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const owner = room.participants.find(candidate => (
+      getCollaborationParticipantId(candidate) === task.ownerId
+    ));
+    const reviewer = room.participants.find(candidate => (
+      getCollaborationParticipantId(candidate) === task.reviewerId
+    ));
+    if (!owner || !reviewer) throw new Error('Task owner or reviewer is unavailable');
+    if (owner.resourcePolicy?.mode === 'unavailable') {
+      new Notice(`${task.ownerId} is unavailable. Reassign the task before running it.`);
+      return;
+    }
+    if (reviewer.resourcePolicy?.mode === 'unavailable') {
+      new Notice(`${task.reviewerId} is unavailable. Reassign the reviewer before running it.`);
+      return;
+    }
+    const running = transitionCollaborationTask(
+      room.workQueue,
+      taskId,
+      'running',
+      { actorId: task.ownerId },
+    );
+    await this.plugin.storage.rooms.updateWorkQueue(roomId, running);
+    this.refreshCollaborationTimelines(roomId);
+    const synthesis = room.events.find(event => (
+      event.deliberationId === room.workQueue?.sourceDeliberationId
+      && event.deliberationPhase === 'synthesis'
+      && event.authorId !== 'system'
+    ));
+    const original = room.events.find(event => (
+      event.deliberationId === room.workQueue?.sourceDeliberationId
+      && event.deliberationPhase === 'position'
+      && event.authorId === 'user'
+    ));
+    const workflowId = `task-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    new Notice(`${task.id} started with ${task.ownerId}; ${task.reviewerId} will review.`);
+    const handled = await this.routeCollaborationMessage(
+      originTabId,
+      `@${task.ownerId} @${task.reviewerId} Execute queue task ${task.id}`,
+      undefined,
+      {
+        id: workflowId,
+        deliberationId: room.workQueue.sourceDeliberationId,
+        originalGoal: original?.content ?? task.description,
+        approvedSynthesis: synthesis?.content ?? task.description,
+        taskId,
+      },
+    );
+    if (!handled) {
+      const latest = await this.plugin.storage.rooms.get(roomId);
+      if (latest?.workQueue) {
+        const failed = transitionCollaborationTask(
+          latest.workQueue,
+          taskId,
+          'failed',
+          { actorId: task.reviewerId },
+        );
+        await this.plugin.storage.rooms.updateWorkQueue(roomId, failed);
+      }
+      throw new Error(`Could not route ${task.id}`);
+    }
+  }
+
+  private async retryCollaborationWorkTask(roomId: string, taskId: string): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    const task = room.workQueue.tasks.find(candidate => candidate.id === taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const ready = transitionCollaborationTask(
+      room.workQueue,
+      taskId,
+      'ready',
+      { actorId: task.ownerId },
+    );
+    await this.plugin.storage.rooms.updateWorkQueue(roomId, ready);
+    new Notice(`${taskId} is ready for retry (${task.attempts}/${task.maxAttempts} used).`);
+    this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async setCollaborationWorkQueuePaused(
+    roomId: string,
+    paused: boolean,
+  ): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    const queue = setCollaborationWorkQueuePaused(room.workQueue, paused);
+    await this.plugin.storage.rooms.updateWorkQueue(roomId, queue);
+    new Notice(paused ? 'Task queue paused.' : 'Task queue resumed.');
+    this.refreshCollaborationTimelines(roomId);
   }
 
   private async startApprovedCollaborationPlan(

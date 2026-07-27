@@ -39,6 +39,17 @@ function scopesOverlap(left: string, right: string): string | null {
   return null;
 }
 
+function fileMatchesScope(path: string, scope: string): boolean {
+  const normalizedPath = path.replace(/\\/g, '/').replace(/^\.?\//, '');
+  const normalized = scope.replace(/\\/g, '/').replace(/^\.?\//, '');
+  const prefix = normalizeScope(normalized);
+  if (!prefix) return false;
+  if (normalized.includes('*')) {
+    return normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`);
+  }
+  return normalizedPath === prefix;
+}
+
 export function parseCollaborationTaskGraph(
   content: string,
   sourceDeliberationId: string,
@@ -163,6 +174,20 @@ export function approveCollaborationWorkQueue(
   return approved;
 }
 
+export function setCollaborationWorkQueuePaused(
+  queue: CollaborationWorkQueue,
+  paused: boolean,
+  now = Date.now(),
+): CollaborationWorkQueue {
+  if (queue.status === 'draft' || queue.status === 'completed') {
+    throw new Error(`Cannot ${paused ? 'pause' : 'resume'} a ${queue.status} queue`);
+  }
+  const updated = structuredClone(queue);
+  updated.status = paused ? 'paused' : 'approved';
+  updated.updatedAt = now;
+  return updated;
+}
+
 export function findCollaborationTaskScopeConflicts(
   queue: CollaborationWorkQueue,
 ): CollaborationTaskScopeConflict[] {
@@ -191,7 +216,6 @@ function requireEvidence(task: CollaborationWorkTask): CollaborationTaskEvidence
   const evidence = task.evidence;
   if (
     !evidence?.summary.trim()
-    || evidence.filesChanged.length === 0
     || !task.acceptanceCriteria.every(criterion => evidence.acceptanceCriteriaMet.includes(criterion))
     || !task.verificationCommands.every(command => evidence.verificationResults.some(result => (
       result.command === command && result.status === 'passed'
@@ -215,7 +239,7 @@ export function transitionCollaborationTask(
   const allowed: Partial<Record<CollaborationTaskStatus, CollaborationTaskStatus[]>> = {
     ready: ['running', 'cancelled'],
     running: ['review', 'failed', 'cancelled'],
-    review: ['done', 'running'],
+    review: ['done', 'failed', 'running'],
     failed: ['ready', 'cancelled'],
   };
   if (!allowed[task.status]?.includes(nextStatus)) {
@@ -227,6 +251,14 @@ export function transitionCollaborationTask(
   if (nextStatus === 'review') {
     if (options.actorId !== task.ownerId) throw new Error(`Only ${task.ownerId} can submit ${task.id}`);
     if (!options.evidence) throw new Error(`${task.id} needs execution evidence`);
+    const outsideScope = options.evidence.filesChanged.filter(path => (
+      !task.fileScopes.some(scope => fileMatchesScope(path, scope))
+    ));
+    if (outsideScope.length > 0) {
+      throw new Error(
+        `${task.id} reported files outside its allowed file scopes: ${outsideScope.join(', ')}`,
+      );
+    }
     task.evidence = structuredClone(options.evidence);
   }
   if (nextStatus === 'done') {

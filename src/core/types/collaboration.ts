@@ -46,6 +46,13 @@ export interface CollaborationTaskEvidence {
   commitSha?: string;
   knownLimitations?: string[];
   completedAt?: number;
+  review?: {
+    reviewerId: string;
+    verdict: 'approve' | 'changes-needed';
+    findings: string[];
+    reviewedAt: number;
+  };
+  resourceUsage?: CollaborationResourceUsageSnapshot[];
 }
 
 export interface CollaborationWorkTask {
@@ -90,6 +97,7 @@ export interface CollaborationWorkflowMetadata {
   id: string;
   deliberationId: string;
   phase: CollaborationWorkflowPhase;
+  taskId?: string;
 }
 
 export interface CollaborationResourceUsageSnapshot {

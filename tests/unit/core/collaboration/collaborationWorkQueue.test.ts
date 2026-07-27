@@ -2,6 +2,7 @@ import {
   approveCollaborationWorkQueue,
   findCollaborationTaskScopeConflicts,
   parseCollaborationTaskGraph,
+  setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
   validateCollaborationWorkQueue,
 } from '@/core/collaboration/collaborationWorkQueue';
@@ -94,6 +95,16 @@ describe('collaboration work queue', () => {
     expect(approved.tasks.map(task => task.status)).toEqual(['ready', 'blocked']);
   });
 
+  it('pauses and resumes without mutating individual task states', () => {
+    const approved = approveCollaborationWorkQueue(queue(), participants, 20);
+    const paused = setCollaborationWorkQueuePaused(approved, true, 21);
+    const resumed = setCollaborationWorkQueuePaused(paused, false, 22);
+
+    expect(paused.status).toBe('paused');
+    expect(resumed.status).toBe('approved');
+    expect(resumed.tasks.map(task => task.status)).toEqual(['ready', 'blocked']);
+  });
+
   it('rejects unknown dependencies, cycles, and same-person review', () => {
     const invalid = queue();
     invalid.tasks[0].dependsOn = ['TASK-002'];
@@ -146,5 +157,24 @@ describe('collaboration work queue', () => {
       now: 24,
     });
     expect(done.tasks.map(task => task.status)).toEqual(['done', 'ready']);
+  });
+
+  it('rejects owner evidence that claims files outside the task scope', () => {
+    const approved = approveCollaborationWorkQueue(queue(), participants, 20);
+    const running = transitionCollaborationTask(approved, 'TASK-001', 'running', {
+      actorId: 'codex',
+      now: 21,
+    });
+
+    expect(() => transitionCollaborationTask(running, 'TASK-001', 'review', {
+      actorId: 'codex',
+      now: 22,
+      evidence: {
+        summary: 'Changed settings.',
+        filesChanged: ['src/features/settings.ts'],
+        acceptanceCriteriaMet: ['Queue persists'],
+        verificationResults: [{ command: 'npm test', status: 'passed' }],
+      },
+    })).toThrow('outside its allowed file scopes');
   });
 });
