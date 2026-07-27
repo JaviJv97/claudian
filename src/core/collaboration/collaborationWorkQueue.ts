@@ -1,4 +1,5 @@
 import type {
+  CollaborationParticipantResourcePolicy,
   CollaborationTaskEvidence,
   CollaborationTaskStatus,
   CollaborationWorkQueue,
@@ -348,6 +349,42 @@ export function findCollaborationTaskScopeConflicts(
     }
   }
   return conflicts;
+}
+
+export function getRecommendedCollaborationWorkTask(
+  queue: CollaborationWorkQueue,
+  participantPolicies: Readonly<Record<
+    string,
+    CollaborationParticipantResourcePolicy | undefined
+  >>,
+): CollaborationWorkTask | undefined {
+  if (queue.status !== 'approved') return undefined;
+  const isEligible = (participantId: string): boolean => {
+    const policy = participantPolicies[participantId];
+    return (
+      (policy?.mode ?? 'active') === 'active'
+      && (policy?.weeklyUsagePercent ?? 0) < 90
+    );
+  };
+  const riskOrder: Record<CollaborationWorkTask['risk'], number> = {
+    low: 0,
+    medium: 1,
+    high: 2,
+  };
+  return queue.tasks
+    .filter(task => (
+      task.status === 'ready'
+      && task.risk !== 'high'
+      && isEligible(task.ownerId)
+      && isEligible(task.reviewerId)
+    ))
+    .sort((left, right) => (
+      riskOrder[left.risk] - riskOrder[right.risk]
+      || (participantPolicies[left.ownerId]?.weeklyUsagePercent ?? 0)
+        - (participantPolicies[right.ownerId]?.weeklyUsagePercent ?? 0)
+      || left.attempts - right.attempts
+      || left.id.localeCompare(right.id)
+    ))[0];
 }
 
 function requireEvidence(task: CollaborationWorkTask): CollaborationTaskEvidence {

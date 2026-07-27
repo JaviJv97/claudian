@@ -5,7 +5,10 @@ import {
   getQuotaRoutingRecommendation,
   isQuotaSnapshotStale,
 } from '../../../core/collaboration/collaborationResourcePolicy';
-import { validateCollaborationWorkQueue } from '../../../core/collaboration/collaborationWorkQueue';
+import {
+  getRecommendedCollaborationWorkTask,
+  validateCollaborationWorkQueue,
+} from '../../../core/collaboration/collaborationWorkQueue';
 import type {
   CollaborationDiscussionMode,
   CollaborationEvent,
@@ -696,6 +699,35 @@ export class CollaborationTimeline {
         pause.disabled = true;
         void this.options.onSetWorkQueuePaused(queue.status === 'approved')
           .catch(() => { pause.disabled = false; });
+      });
+    }
+    const recommended = getRecommendedCollaborationWorkTask(
+      queue,
+      this.options.participantResourcePolicies,
+    );
+    if (recommended) {
+      const recommendation = panel.createDiv({
+        cls: 'claudian-collaboration-work-queue-recommendation',
+      });
+      const copy = recommendation.createDiv();
+      copy.createSpan({ text: 'Recommended next' });
+      copy.createEl('strong', { text: `${recommended.id} · ${recommended.title}` });
+      const run = recommendation.createEl('button', {
+        text: 'Run',
+        attr: {
+          type: 'button',
+          title: `Run ${recommended.id} with ${this.getParticipantLabel(
+            recommended.ownerId,
+          )}`,
+        },
+      });
+      run.addEventListener('click', () => {
+        run.disabled = true;
+        run.setText('Starting…');
+        void this.options.onRunWorkTask(recommended.id).catch(() => {
+          run.disabled = false;
+          run.setText('Run');
+        });
       });
     }
     const list = panel.createDiv({ cls: 'claudian-collaboration-work-queue-list' });

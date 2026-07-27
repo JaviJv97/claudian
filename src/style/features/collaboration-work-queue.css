@@ -42,6 +42,36 @@
   margin-top: var(--size-4-3);
 }
 
+.claudian-collaboration-work-queue-recommendation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-3);
+  padding: var(--size-4-2);
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.claudian-collaboration-work-queue-recommendation > div {
+  display: grid;
+  min-width: 0;
+}
+
+.claudian-collaboration-work-queue-recommendation span {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-work-queue-recommendation strong {
+  overflow: hidden;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .claudian-collaboration-work-task {
   padding: var(--size-4-2);
   border-left: 2px solid var(--background-modifier-border);

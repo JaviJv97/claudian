@@ -2,6 +2,7 @@ import {
   approveCollaborationWorkQueue,
   approveCompletedCollaborationWorkQueue,
   findCollaborationTaskScopeConflicts,
+  getRecommendedCollaborationWorkTask,
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
@@ -281,5 +282,40 @@ describe('collaboration work queue', () => {
 
     expect(accepted.status).toBe('completed');
     expect(accepted.completionApprovedAt).toBe(30);
+  });
+
+  it('recommends a low-risk ready task without consuming protected accounts', () => {
+    const approved = approveCollaborationWorkQueue(queue(), participants, 20);
+    approved.tasks.push({
+      ...approved.tasks[0],
+      id: 'TASK-003',
+      title: 'Safe task',
+      ownerId: 'company',
+      reviewerId: 'codex',
+      risk: 'low',
+      status: 'ready',
+    });
+
+    expect(getRecommendedCollaborationWorkTask(approved, {
+      codex: { mode: 'active', weeklyUsagePercent: 20 },
+      company: { mode: 'active', weeklyUsagePercent: 1 },
+      personal: { mode: 'preserve', weeklyUsagePercent: 97 },
+    })?.id).toBe('TASK-003');
+
+    approved.tasks[0].status = 'blocked';
+    approved.tasks[2].ownerId = 'personal';
+    expect(getRecommendedCollaborationWorkTask(approved, {
+      codex: { mode: 'active', weeklyUsagePercent: 20 },
+      company: { mode: 'active', weeklyUsagePercent: 1 },
+      personal: { mode: 'preserve', weeklyUsagePercent: 97 },
+    })).toBeUndefined();
+
+    approved.tasks[2].ownerId = 'company';
+    approved.tasks[2].risk = 'high';
+    expect(getRecommendedCollaborationWorkTask(approved, {
+      codex: { mode: 'active', weeklyUsagePercent: 20 },
+      company: { mode: 'active', weeklyUsagePercent: 1 },
+      personal: { mode: 'active', weeklyUsagePercent: 1 },
+    })).toBeUndefined();
   });
 });
