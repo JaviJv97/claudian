@@ -712,7 +712,12 @@ export class CollaborationTimeline {
       const pause = header.createEl('button', {
         cls: 'claudian-collaboration-work-queue-pause',
         text: queue.status === 'paused' ? 'Resume' : 'Pause',
-        attr: { type: 'button' },
+        attr: {
+          type: 'button',
+          title: queue.status === 'paused'
+            ? 'Resume scheduling new tasks'
+            : 'Pause scheduling new tasks; active execution and review will continue',
+        },
       });
       pause.addEventListener('click', () => {
         pause.disabled = true;
@@ -969,7 +974,7 @@ export class CollaborationTimeline {
           ? task.reviewerId
           : undefined;
       if (
-        queue.status === 'approved'
+        (queue.status === 'approved' || queue.status === 'paused')
         && activeParticipantId
         && !this.options.canStop(activeParticipantId)
       ) {

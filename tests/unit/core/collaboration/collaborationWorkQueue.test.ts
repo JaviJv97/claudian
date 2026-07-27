@@ -3,6 +3,7 @@ import {
   approveCompletedCollaborationWorkQueue,
   findCollaborationTaskScopeConflicts,
   getRecommendedCollaborationWorkTask,
+  isCollaborationPathInTaskScope,
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
@@ -141,6 +142,33 @@ describe('collaboration work queue', () => {
     expect(resumed.tasks.map(task => task.status)).toEqual(['ready', 'blocked']);
   });
 
+  it('lets in-flight work reach review while new scheduling is paused', () => {
+    const approved = approveCollaborationWorkQueue(queue(), participants, 20);
+    const running = transitionCollaborationTask(approved, 'TASK-001', 'running', {
+      actorId: 'codex',
+      now: 21,
+    });
+    const paused = setCollaborationWorkQueuePaused(running, true, 22);
+    const review = transitionCollaborationTask(paused, 'TASK-001', 'review', {
+      actorId: 'codex',
+      now: 23,
+      evidence: {
+        summary: 'Implemented.',
+        filesChanged: ['src/core/queue.ts'],
+        acceptanceCriteriaMet: ['Queue persists'],
+        verificationResults: [{ command: 'npm test', status: 'passed' }],
+      },
+    });
+
+    expect(review.status).toBe('paused');
+    expect(review.tasks[0].status).toBe('review');
+    const freshPaused = setCollaborationWorkQueuePaused(approved, true, 24);
+    expect(() => transitionCollaborationTask(freshPaused, 'TASK-001', 'running', {
+      actorId: 'codex',
+      now: 24,
+    })).toThrow('scheduling is paused');
+  });
+
   it('lets a human reassign a draft task while preserving independent review', () => {
     const updated = updateCollaborationDraftTaskAssignment(
       queue(),
@@ -225,6 +253,18 @@ describe('collaboration work queue', () => {
     expect(findCollaborationTaskScopeConflicts(candidate)).toEqual([
       { leftTaskId: 'TASK-001', rightTaskId: 'TASK-002', scope: 'src/core' },
     ]);
+  });
+
+  it('matches concrete workspace paths against bounded task scopes', () => {
+    expect(isCollaborationPathInTaskScope(
+      'src/core/collaboration/queue.ts',
+      ['src/core/**'],
+    )).toBe(true);
+    expect(isCollaborationPathInTaskScope(
+      'src/features/chat.ts',
+      ['src/core/**'],
+    )).toBe(false);
+    expect(isCollaborationPathInTaskScope('package.json', ['package.json'])).toBe(true);
   });
 
   it('requires complete passing evidence before a reviewer can mark a task done', () => {

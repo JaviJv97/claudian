@@ -51,6 +51,13 @@ function fileMatchesScope(path: string, scope: string): boolean {
   return normalizedPath === prefix;
 }
 
+export function isCollaborationPathInTaskScope(
+  path: string,
+  fileScopes: readonly string[],
+): boolean {
+  return fileScopes.some(scope => fileMatchesScope(path, scope));
+}
+
 function isUnsafeFileScope(scope: string): boolean {
   const normalized = scope.trim().replace(/\\/g, '/');
   return (
@@ -421,7 +428,9 @@ export function transitionCollaborationTask(
   nextStatus: CollaborationTaskStatus,
   options: CollaborationTaskTransitionOptions,
 ): CollaborationWorkQueue {
-  if (queue.status !== 'approved') throw new Error('The work queue is not approved');
+  if (queue.status !== 'approved' && queue.status !== 'paused') {
+    throw new Error('The work queue is not approved');
+  }
   const updated = structuredClone(queue);
   const task = updated.tasks.find(candidate => candidate.id === taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
@@ -434,6 +443,15 @@ export function transitionCollaborationTask(
   if (!allowed[task.status]?.includes(nextStatus)) {
     throw new Error(`Cannot transition ${task.id} from ${task.status} to ${nextStatus}`);
   }
+  if (
+    queue.status === 'paused'
+    && (
+      (task.status === 'ready' && nextStatus === 'running')
+      || (task.status === 'failed' && nextStatus === 'ready')
+    )
+  ) {
+    throw new Error('Queue scheduling is paused');
+  }
   if (nextStatus === 'running' && options.actorId !== task.ownerId) {
     throw new Error(`Only ${task.ownerId} can run ${task.id}`);
   }
@@ -441,7 +459,7 @@ export function transitionCollaborationTask(
     if (options.actorId !== task.ownerId) throw new Error(`Only ${task.ownerId} can submit ${task.id}`);
     if (!options.evidence) throw new Error(`${task.id} needs execution evidence`);
     const outsideScope = options.evidence.filesChanged.filter(path => (
-      !task.fileScopes.some(scope => fileMatchesScope(path, scope))
+      !isCollaborationPathInTaskScope(path, task.fileScopes)
     ));
     if (outsideScope.length > 0) {
       throw new Error(

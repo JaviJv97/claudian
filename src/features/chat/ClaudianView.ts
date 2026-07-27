@@ -36,6 +36,7 @@ import {
   approveCollaborationWorkQueue,
   approveCompletedCollaborationWorkQueue,
   type CollaborationDraftTaskContractUpdate,
+  isCollaborationPathInTaskScope,
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
@@ -938,8 +939,15 @@ export class ClaudianView extends ItemView {
       return true;
     }
     const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
-    const sharedReferencedFiles = workflow
-      ? markdownFiles.map(file => file.path)
+    const sharedReferencedFiles = workflowTask
+      ? this.plugin.app.vault.getFiles()
+        .map(file => file.path)
+        .filter(path => (
+          isCollaborationPathInTaskScope(path, workflowTask.fileScopes)
+          && !/\.(?:avif|gif|ico|jpe?g|mp[34]|pdf|png|webm|webp|woff2?|zip)$/i.test(path)
+        ))
+      : workflow
+        ? markdownFiles.map(file => file.path)
       : findSharedReferencedFiles(
         Object.fromEntries(collaborationTurn.recipientIds.map(providerId => [
           providerId,
@@ -973,8 +981,8 @@ export class ClaudianView extends ItemView {
         }] as const;
       })),
     );
-    const fileBaseline = await captureSharedFileSnapshot();
-    const fileContentBaseline = await captureSharedFileContentSnapshot();
+    let fileBaseline = await captureSharedFileSnapshot();
+    let fileContentBaseline = await captureSharedFileContentSnapshot();
     let activeDeliberationId: string | undefined;
     let activeDeliberationPhase: CollaborationDeliberationPhase | undefined;
     let activeWorkflowPhase: CollaborationWorkflowPhase | undefined;
@@ -1236,6 +1244,18 @@ export class ClaudianView extends ItemView {
             latest.workQueue.updatedAt,
           );
           room.workQueue = structuredClone(inReview);
+          for (const path of evidence.filesChanged) {
+            if (
+              !sharedReferencedFiles.includes(path)
+              && isCollaborationPathInTaskScope(path, task.fileScopes)
+              && !/\.(?:avif|gif|ico|jpe?g|mp[34]|pdf|png|webm|webp|woff2?|zip)$/i.test(path)
+              && await this.plugin.app.vault.adapter.exists(path)
+            ) {
+              sharedReferencedFiles.push(path);
+            }
+          }
+          fileBaseline = await captureSharedFileSnapshot();
+          fileContentBaseline = await captureSharedFileContentSnapshot();
           this.refreshCollaborationTimelines(room.id);
         } catch (error) {
           return failTask(error instanceof Error ? error.message : `${task.id} evidence failed`);
@@ -2425,7 +2445,11 @@ export class ClaudianView extends ItemView {
       queue,
       room.workQueue.updatedAt,
     );
-    new Notice(paused ? 'Task queue paused.' : 'Task queue resumed.');
+    new Notice(
+      paused
+        ? 'Task scheduling paused. Active execution and review will continue.'
+        : 'Task scheduling resumed.',
+    );
     this.refreshCollaborationTimelines(roomId);
   }
 
