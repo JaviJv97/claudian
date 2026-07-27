@@ -6,6 +6,7 @@ import {
   isQuotaSnapshotStale,
 } from '../../../core/collaboration/collaborationResourcePolicy';
 import { getCollaborationParticipantId } from '../../../core/collaboration/collaborationRoom';
+import { ClaudeProcessRegistry } from '../../../core/runtime/ClaudeProcessRegistry';
 import type { ProviderQuotaWindow } from '../../../core/runtime/types';
 import type {
   CollaborationParticipant,
@@ -152,7 +153,14 @@ export class CollaborationUsageDashboardModal extends Modal {
       && !isQuotaSnapshotStale(participant.resourcePolicy.quotaSnapshot)
     )).length;
     this.renderSupportMetric(supports, 'Fresh snapshots', `${freshCount}/${room.participants.length}`);
+    const runtimeHealth = ClaudeProcessRegistry.getSnapshot();
+    this.renderSupportMetric(
+      supports,
+      'Claude runtimes',
+      `${runtimeHealth.activeGroups}/6`,
+    );
 
+    this.renderRuntimeHealth();
     this.renderParticipants(room);
     this.renderWorkflowUsage(room);
   }
@@ -161,6 +169,41 @@ export class CollaborationUsageDashboardModal extends Modal {
     const metric = container.createDiv({ cls: 'claudian-usage-dashboard-support' });
     metric.createSpan({ cls: 'claudian-usage-dashboard-metric-label', text: label });
     metric.createSpan({ cls: 'claudian-usage-dashboard-support-value', text: value });
+  }
+
+  private renderRuntimeHealth(): void {
+    const snapshot = ClaudeProcessRegistry.getSnapshot();
+    const section = this.contentEl.createEl('section', {
+      cls: 'claudian-usage-dashboard-runtime',
+      attr: {
+        'aria-label': 'Claude runtime health',
+        'data-health': snapshot.health,
+      },
+    });
+    const status = section.createDiv({ cls: 'claudian-usage-dashboard-runtime-status' });
+    status.createSpan({
+      cls: 'claudian-usage-dashboard-runtime-dot',
+      attr: { 'aria-hidden': 'true' },
+    });
+    const text = status.createDiv();
+    text.createEl('strong', { text: `Runtime health: ${snapshot.health}` });
+    text.createSpan({
+      text: snapshot.residentBytes === null
+        ? `${snapshot.activeGroups} plugin-owned process groups · memory unavailable`
+        : `${snapshot.activeGroups} plugin-owned process groups · ${
+          Math.round(snapshot.residentBytes / 1024 ** 2).toLocaleString()
+        } MiB`,
+    });
+    if (snapshot.terminatingGroups > 0) {
+      const cleanup = section.createEl('button', {
+        text: 'Clean up stopped runtimes',
+        attr: { type: 'button' },
+      });
+      cleanup.addEventListener('click', () => {
+        ClaudeProcessRegistry.cleanupStoppedGroups();
+        void this.render();
+      });
+    }
   }
 
   private renderParticipants(room: CollaborationRoom): void {
@@ -209,7 +252,13 @@ export class CollaborationUsageDashboardModal extends Modal {
           : 'No provider snapshot',
       });
       if (policy?.quotaRefreshError) {
-        detail.setText(`Refresh failed · ${policy.quotaRefreshError}`);
+        detail.setText(
+          `Refresh failed · ${policy.quotaRefreshError}${
+            policy.quotaNextRetryAt
+              ? ` · retry ${formatRelativeTime(policy.quotaNextRetryAt)}`
+              : ''
+          }`,
+        );
         detail.addClass('is-error');
       }
 

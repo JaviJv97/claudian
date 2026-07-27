@@ -57,6 +57,7 @@ import { NavigationSidebar } from '../ui/NavigationSidebar';
 import { StatusPanel } from '../ui/StatusPanel';
 import { autoResizeTextarea } from '../ui/textareaResize';
 import { recalculateUsageForModel } from '../utils/usageInfo';
+import { VoiceInputController } from '../voice/VoiceInputController';
 import { getTabProviderId } from './providerResolution';
 import { TabSession } from './TabSession';
 import type {
@@ -711,6 +712,7 @@ export function createTab(options: TabCreateOptions): TabData {
       contextUsageMeter: null,
       statusPanel: null,
       navigationSidebar: null,
+      voiceInputController: null,
     },
     dom,
     renderer: null,
@@ -1036,6 +1038,17 @@ function initializeInputToolbar(
     getCapabilities: () => getTabCapabilities(tab, plugin),
     getSettings: () => getTabSettingsSnapshot(tab, plugin),
     getEnvironmentVariables: () => plugin.getActiveEnvironmentVariables(),
+    onCustomModelAdd: async (model: string) => {
+      const uiConfig = getTabChatUIConfig(tab, plugin);
+      if (!uiConfig.addCustomModel) {
+        throw new Error('This provider does not support custom model IDs');
+      }
+      let selectedModel = '';
+      await updateTabProviderSettings(tab, plugin, settings => {
+        selectedModel = uiConfig.addCustomModel!(model, settings);
+      });
+      return selectedModel;
+    },
     onModelChange: async (model: string) => {
       // For blank tabs, update draft model and derive provider
       if (tab.lifecycleState === 'blank') {
@@ -1192,6 +1205,7 @@ function initializeInputToolbar(
   tab.ui.mcpServerSelector = toolbarComponents.mcpServerSelector;
   tab.ui.permissionToggle = toolbarComponents.permissionToggle;
   tab.ui.serviceTierToggle = toolbarComponents.serviceTierToggle;
+  tab.ui.voiceInputController = new VoiceInputController(inputToolbar, dom.inputEl);
 
   tab.ui.mcpServerSelector.setMcpManager(getProviderMcpManager(getTabProviderId(tab, plugin)));
 
@@ -2010,6 +2024,8 @@ export async function destroyTab(tab: TabData): Promise<void> {
   tab.ui.statusPanel = null;
   tab.ui.navigationSidebar?.destroy();
   tab.ui.navigationSidebar = null;
+  tab.ui.voiceInputController?.destroy();
+  tab.ui.voiceInputController = null;
 
   for (const cleanup of tab.dom.eventCleanups) {
     cleanup();

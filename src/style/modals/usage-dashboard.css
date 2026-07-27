@@ -110,6 +110,53 @@
   letter-spacing: -0.02em;
 }
 
+.claudian-usage-dashboard-runtime {
+  align-items: center;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 10px 12px;
+}
+
+.claudian-usage-dashboard-runtime-status {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.claudian-usage-dashboard-runtime-status > div {
+  display: grid;
+  gap: 2px;
+}
+
+.claudian-usage-dashboard-runtime-status span {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.claudian-usage-dashboard-runtime-dot {
+  background: var(--color-green);
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.claudian-usage-dashboard-runtime[data-health="warning"] .claudian-usage-dashboard-runtime-dot,
+.claudian-usage-dashboard-runtime[data-health="paused"] .claudian-usage-dashboard-runtime-dot {
+  background: var(--color-orange);
+}
+
+.claudian-usage-dashboard-runtime[data-health="critical"] .claudian-usage-dashboard-runtime-dot {
+  background: var(--color-red);
+}
+
 .claudian-usage-dashboard-section {
   margin-top: 20px;
 }

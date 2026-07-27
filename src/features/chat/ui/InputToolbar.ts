@@ -54,6 +54,7 @@ export interface ToolbarSettings {
 
 export interface ToolbarCallbacks {
   onModelChange: (model: string) => Promise<void>;
+  onCustomModelAdd?: (model: string) => Promise<string>;
   onModeChange: (mode: string) => Promise<void>;
   onThinkingBudgetChange: (budget: string) => Promise<void>;
   onEffortLevelChange: (effort: string) => Promise<void>;
@@ -165,6 +166,53 @@ export class ModelSelector {
           this.updateDisplay();
           this.renderOptions();
         }, 'Failed to change model');
+      });
+    }
+
+    if (this.callbacks.onCustomModelAdd && this.callbacks.getUIConfig().addCustomModel) {
+      const form = this.dropdownEl.createEl('form', {
+        cls: 'claudian-model-custom-form',
+      });
+      const input = form.createEl('input', {
+        cls: 'claudian-model-custom-input',
+        attr: {
+          'aria-label': 'Custom model ID',
+          autocomplete: 'off',
+          name: 'custom-model-id',
+          placeholder: 'Custom model ID',
+          type: 'text',
+        },
+      });
+      const addButton = form.createEl('button', {
+        cls: 'claudian-model-custom-submit',
+        text: 'Use',
+        attr: { type: 'submit' },
+      });
+
+      form.addEventListener('click', event => event.stopPropagation());
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const model = input.value.trim();
+        if (!model) {
+          input.setAttribute('aria-invalid', 'true');
+          input.focus();
+          return;
+        }
+
+        input.removeAttribute('aria-invalid');
+        addButton.disabled = true;
+        runToolbarAction(async () => {
+          try {
+            const selectedModel = await this.callbacks.onCustomModelAdd!(model);
+            input.value = '';
+            await this.callbacks.onModelChange(selectedModel);
+            this.updateDisplay();
+            this.renderOptions();
+          } finally {
+            addButton.disabled = false;
+          }
+        }, 'Failed to add custom model');
       });
     }
   }

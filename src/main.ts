@@ -41,6 +41,7 @@ import type {
 } from './core/providers/types';
 import type { AppTabManagerState } from './core/providers/types';
 import { DEFAULT_CHAT_PROVIDER_ID } from './core/providers/types';
+import { ClaudeProcessRegistry } from './core/runtime/ClaudeProcessRegistry';
 import type {
   ClaudianSettings,
   Conversation,
@@ -128,6 +129,7 @@ export default class ClaudianPlugin extends Plugin {
   private sessionMetadataLoadTimer: number | null = null;
   private remainingSessionMetadataLoad: Promise<void> | null = null;
   private isUnloading = false;
+  private unsubscribeClaudeProcessHealth: (() => void) | null = null;
 
   async onload() {
     StartupProfiler.startOnload();
@@ -300,6 +302,44 @@ export default class ClaudianPlugin extends Plugin {
         },
       });
 
+      this.addCommand({
+        id: 'copy-claude-runtime-diagnostics',
+        name: 'Copy Claude runtime diagnostics',
+        callback: async () => {
+          await navigator.clipboard.writeText(ClaudeProcessRegistry.describe());
+          new Notice('Claude runtime diagnostics copied to clipboard.');
+        },
+      });
+
+      this.addCommand({
+        id: 'cleanup-stopped-claude-runtimes',
+        name: 'Clean up stopped Claude runtimes',
+        callback: () => {
+          const cleaned = ClaudeProcessRegistry.cleanupStoppedGroups();
+          new Notice(
+            cleaned > 0
+              ? `Force-cleaned ${cleaned} stopped Claude runtime group${cleaned === 1 ? '' : 's'}.`
+              : 'No stopped Claude runtime groups needed cleanup.',
+          );
+        },
+      });
+
+      let previousClaudeHealth = ClaudeProcessRegistry.getSnapshot().health;
+      this.unsubscribeClaudeProcessHealth?.();
+      this.unsubscribeClaudeProcessHealth = ClaudeProcessRegistry.subscribe((snapshot) => {
+        if (snapshot.health === previousClaudeHealth) return;
+        previousClaudeHealth = snapshot.health;
+        if (snapshot.health === 'warning') {
+          new Notice('Claude runtimes are using more than 3 gigabytes of memory.');
+        } else if (snapshot.health === 'paused') {
+          new Notice('Claude background work paused: runtimes exceed 4 gigabytes.');
+        } else if (snapshot.health === 'critical') {
+          new Notice('Claude safety limit reached: new runtimes are blocked above 5 gigabytes.');
+        } else {
+          new Notice('Claude runtime memory returned to a healthy level.');
+        }
+      });
+
       this.addSettingTab(new ClaudianSettingTab(this.app, this));
       this.scheduleRemainingSessionMetadataLoad();
     } finally {
@@ -309,6 +349,9 @@ export default class ClaudianPlugin extends Plugin {
 
   onunload(): void {
     this.isUnloading = true;
+    this.unsubscribeClaudeProcessHealth?.();
+    this.unsubscribeClaudeProcessHealth = null;
+    ClaudeProcessRegistry.terminateAll();
     if (this.sessionMetadataLoadTimer !== null) {
       window.clearTimeout(this.sessionMetadataLoadTimer);
       this.sessionMetadataLoadTimer = null;

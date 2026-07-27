@@ -52,6 +52,7 @@ import {
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
+import { ClaudeProcessRegistry } from '../../core/runtime/ClaudeProcessRegistry';
 import type {
   CollaborationDeliberationPhase,
   CollaborationEvent,
@@ -117,6 +118,12 @@ interface CollaborationWorkflowRoute {
   taskId?: string;
 }
 
+interface QueuedCollaborationMessage {
+  originTabId: TabId;
+  content: string;
+  images?: ImageAttachment[];
+}
+
 export class ClaudianView extends ItemView {
   private plugin: FeatureHost;
 
@@ -151,8 +158,10 @@ export class ClaudianView extends ItemView {
   private collaborationTimelines = new Map<TabId, CollaborationTimeline>();
   private collaborationReconcileQueue: Promise<void> = Promise.resolve();
   private activeCollaborationDeliveries = new Map<string, string>();
+  private queuedCollaborationMessages = new Map<string, QueuedCollaborationMessage[]>();
   private quotaRefreshInterval: number | null = null;
   private quotaRefreshFlights = new Map<string, Promise<void>>();
+  private quotaRefreshBackoff = new Map<string, { failures: number; nextAttemptAt: number }>();
 
   constructor(leaf: WorkspaceLeaf, plugin: FeatureHost) {
     super(leaf);
@@ -398,7 +407,9 @@ export class ClaudianView extends ItemView {
     this.eventRefs = [];
     for (const timeline of this.collaborationTimelines?.values() ?? []) timeline.destroy();
     this.collaborationTimelines?.clear();
+    this.queuedCollaborationMessages?.clear();
     this.quotaRefreshFlights?.clear();
+    this.quotaRefreshBackoff?.clear();
 
     try {
       await this.persistTabStateImmediate();
@@ -599,10 +610,21 @@ export class ClaudianView extends ItemView {
     if (!selection) return false;
 
     const maxTabs = Math.max(3, Math.min(10, this.plugin.settings.maxTabs ?? 3));
-    if (this.tabManager.getTabCount() + selection.participants.length > maxTabs) {
+    const reusableBlankTabs = this.tabManager.getAllTabs().filter(tab => (
+      tab.lifecycleState === 'blank'
+      && !tab.state.isStreaming
+      && !tab.state.isRewinding
+    ));
+    const reusableTabCount = Math.min(reusableBlankTabs.length, selection.participants.length);
+    const additionalTabsNeeded = selection.participants.length - reusableTabCount;
+    if (this.tabManager.getTabCount() + additionalTabsNeeded > maxTabs) {
+      const availableParticipantTabs = Math.max(
+        0,
+        maxTabs - this.tabManager.getTabCount() + reusableTabCount,
+      );
       new Notice(
-        `This room needs ${selection.participants.length} available tabs. `
-        + `Close a tab or raise the tab limit.`,
+        `This room needs ${selection.participants.length} agent tabs, but only `
+        + `${availableParticipantTabs} are available. Close an agent tab or raise the tab limit.`,
       );
       return false;
     }
@@ -610,6 +632,7 @@ export class ClaudianView extends ItemView {
     const roomId = createCollaborationRoomId();
     const createdConversationIds: string[] = [];
     const createdTabIds: TabId[] = [];
+    const reusedTabIds: TabId[] = [];
     let roomCreated = false;
     try {
       const conversations = await Promise.all(selection.participants.map(async (participant) => {
@@ -645,6 +668,19 @@ export class ClaudianView extends ItemView {
       )));
 
       for (const [index, { conversation }] of conversations.entries()) {
+        const reusableTab = reusableBlankTabs[index];
+        if (reusableTab) {
+          await this.tabManager.switchToTab(reusableTab.id);
+          await this.tabManager.openConversation(conversation.id, {
+            activate: index === conversations.length - 1,
+            preferNewTab: false,
+          });
+          if (reusableTab.conversationId !== conversation.id) {
+            throw new Error('Could not reuse a blank agent tab for the collaboration room.');
+          }
+          reusedTabIds.push(reusableTab.id);
+          continue;
+        }
         const tab = await this.tabManager.createTab(conversation.id, undefined, {
           activate: index === conversations.length - 1,
         });
@@ -657,6 +693,14 @@ export class ClaudianView extends ItemView {
       new Notice(`${selection.title} room created.`);
       return true;
     } catch (error) {
+      for (const tabId of reusedTabIds) {
+        try {
+          const tab = this.tabManager.getTab(tabId);
+          await tab?.controllers.conversationController?.createNew({ force: true });
+        } catch {
+          // Continue rollback so one failed blank-tab reset does not strand room records.
+        }
+      }
       for (const tabId of createdTabIds) {
         try {
           await this.tabManager.closeTab(tabId, true);
@@ -919,6 +963,22 @@ export class ClaudianView extends ItemView {
       return true;
     }
     const collaborationTurn = resolveCollaborationTurn(content, routableParticipantIds);
+    if (
+      !workflow
+      && collaborationTurn.recipientIds.some(participantId => (
+        this.activeCollaborationDeliveries.has(
+          this.getCollaborationDeliveryKey(room.id, participantId),
+        )
+      ))
+    ) {
+      this.queueCollaborationMessage(room.id, {
+        originTabId,
+        content,
+        images: images ? images.map(image => ({ ...image })) : undefined,
+      });
+      new Notice('Message queued for the next collaboration round.');
+      return true;
+    }
     const discussionMode = room.discussionMode ?? 'parallel';
     if (
       (discussionMode === 'deliberation' || workflow)
@@ -1640,6 +1700,7 @@ export class ClaudianView extends ItemView {
         }
       }
       this.refreshCollaborationTimelines(room.id);
+      void this.drainNextCollaborationMessage(room.id);
     });
     return true;
   }
@@ -1693,6 +1754,11 @@ export class ClaudianView extends ItemView {
     announce: boolean,
   ): Promise<void> {
     const key = `${roomId}:${participantId}`;
+    if (!announce) {
+      if (ClaudeProcessRegistry.isBackgroundWorkPaused()) return Promise.resolve();
+      const backoff = this.quotaRefreshBackoff.get(key);
+      if (backoff && Date.now() < backoff.nextAttemptAt) return Promise.resolve();
+    }
     this.quotaRefreshFlights ??= new Map();
     const existing = this.quotaRefreshFlights.get(key);
     if (existing) return existing;
@@ -1737,24 +1803,8 @@ export class ClaudianView extends ItemView {
       if (!runtime?.getQuotaSnapshot) {
         throw new Error(`${participant.label ?? participantId} does not expose account quota.`);
       }
-      let quotaSnapshot;
-      try {
-        await runtime.ensureReady();
-        quotaSnapshot = await runtime.getQuotaSnapshot();
-      } catch (initialError) {
-        const conversation = this.plugin.getConversationSync(participant.conversationId);
-        if (!conversation?.sessionId) throw initialError;
-        runtime.resetSession();
-        try {
-          await runtime.ensureReady();
-          quotaSnapshot = await runtime.getQuotaSnapshot();
-        } finally {
-          runtime.syncConversationState(
-            conversation,
-            conversation.externalContextPaths ?? [],
-          );
-        }
-      }
+      await runtime.ensureReady();
+      const quotaSnapshot = await runtime.getQuotaSnapshot();
       const latestRoom = await this.plugin.storage.rooms.get(roomId);
       const latestParticipant = latestRoom?.participants.find(candidate => (
         getCollaborationParticipantId(candidate) === participantId
@@ -1775,8 +1825,11 @@ export class ClaudianView extends ItemView {
             fetchedAt: quotaSnapshot.fetchedAt,
             windows: quotaSnapshot.windows.map(window => ({ ...window })),
           }),
+          quotaNextRetryAt: undefined,
+          quotaRefreshError: undefined,
         },
       );
+      this.quotaRefreshBackoff.delete(`${roomId}:${participantId}`);
       if (announce) {
         new Notice(
           quotaSnapshot.windows.length > 0
@@ -1785,6 +1838,11 @@ export class ClaudianView extends ItemView {
         );
       }
     } catch (error) {
+      const key = `${roomId}:${participantId}`;
+      const failures = (this.quotaRefreshBackoff.get(key)?.failures ?? 0) + 1;
+      const retryDelayMs = Math.min(60 * 60 * 1_000, 5 * 60 * 1_000 * (2 ** (failures - 1)));
+      const nextAttemptAt = Date.now() + retryDelayMs;
+      this.quotaRefreshBackoff.set(key, { failures, nextAttemptAt });
       const latestRoom = await this.plugin.storage.rooms.get(roomId);
       const latestParticipant = latestRoom?.participants.find(candidate => (
         getCollaborationParticipantId(candidate) === participantId
@@ -1795,6 +1853,7 @@ export class ClaudianView extends ItemView {
         participantId,
         {
           ...(latestParticipant?.resourcePolicy ?? participant.resourcePolicy ?? { mode: 'active' }),
+          quotaNextRetryAt: nextAttemptAt,
           quotaRefreshError: message,
         },
       );
@@ -2706,6 +2765,42 @@ export class ClaudianView extends ItemView {
 
   private getCollaborationDeliveryKey(roomId: string, participantId: string): string {
     return `${roomId}:${participantId}`;
+  }
+
+  private queueCollaborationMessage(
+    roomId: string,
+    message: QueuedCollaborationMessage,
+  ): void {
+    const queue = this.queuedCollaborationMessages.get(roomId) ?? [];
+    queue.push(message);
+    this.queuedCollaborationMessages.set(roomId, queue);
+  }
+
+  private async drainNextCollaborationMessage(roomId: string): Promise<void> {
+    if ([...this.activeCollaborationDeliveries.keys()].some(key => (
+      key.startsWith(`${roomId}:`)
+    ))) return;
+    const queue = this.queuedCollaborationMessages.get(roomId);
+    const next = queue?.shift();
+    if (!next) {
+      this.queuedCollaborationMessages.delete(roomId);
+      return;
+    }
+    if (!queue || queue.length === 0) this.queuedCollaborationMessages.delete(roomId);
+    try {
+      await this.routeCollaborationMessage(
+        next.originTabId,
+        next.content,
+        next.images,
+      );
+    } catch (error) {
+      new Notice(
+        error instanceof Error
+          ? `Queued collaboration message failed: ${error.message}`
+          : 'Queued collaboration message failed.',
+      );
+      void this.drainNextCollaborationMessage(roomId);
+    }
   }
 
   private refreshCollaborationTimelines(roomId: string): void {

@@ -10,11 +10,14 @@ import {
   validateCollaborationWorkQueue,
 } from '../../../core/collaboration/collaborationWorkQueue';
 import type {
+  CollaborationDeliberationPhase,
+  CollaborationDeliveryStatus,
   CollaborationDiscussionMode,
   CollaborationEvent,
   CollaborationParticipantResourcePolicy,
   CollaborationResourceUsageSnapshot,
   CollaborationRoom,
+  CollaborationWorkflowPhase,
   CollaborationWorkTask,
   ProviderId,
 } from '../../../core/types';
@@ -101,6 +104,43 @@ function getFallbackParticipantLabel(participantId: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+type CollaborationActivityPhase =
+  | CollaborationDeliberationPhase
+  | CollaborationWorkflowPhase;
+
+export interface ParticipantActivityInput {
+  isStreaming: boolean;
+  needsAttention: boolean;
+  deliveryStatus?: CollaborationDeliveryStatus;
+  phase?: CollaborationActivityPhase;
+}
+
+export interface ParticipantActivity {
+  state: 'attention' | 'working' | 'queued' | 'ready';
+  label: string;
+  stage: string | null;
+}
+
+function formatActivityPhase(phase: CollaborationActivityPhase | undefined): string | null {
+  return phase ? `${phase.charAt(0).toUpperCase()}${phase.slice(1)}` : null;
+}
+
+export function resolveParticipantActivity(
+  input: ParticipantActivityInput,
+): ParticipantActivity {
+  const stage = formatActivityPhase(input.phase);
+  if (input.needsAttention) {
+    return { state: 'attention', label: 'Needs attention', stage };
+  }
+  if (input.isStreaming) {
+    return { state: 'working', label: 'Working', stage: stage ?? 'Responding' };
+  }
+  if (input.deliveryStatus === 'pending' || input.deliveryStatus === 'streaming') {
+    return { state: 'queued', label: 'Queued', stage };
+  }
+  return { state: 'ready', label: 'Ready', stage: null };
 }
 
 const expandedTimelineRoomIds = new Set<string>();
@@ -331,11 +371,11 @@ export class CollaborationTimeline {
           type: 'button',
           'aria-pressed': 'false',
           'data-provider': participantId,
+          'data-identity': String(this.getParticipantIdentityIndex(participantId)),
         },
       });
       const statusEl = button.createSpan({
         cls: 'claudian-collaboration-status',
-        attr: { 'aria-hidden': 'true' },
       });
       this.statusEls.set(participantId, statusEl);
       button.addEventListener('click', () => this.selectRecipient(participantId, button));
@@ -396,9 +436,9 @@ export class CollaborationTimeline {
 
   private async render(generation: number): Promise<void> {
     this.syncRecipientSelection();
-    this.updateParticipantStatuses();
     const room = await this.options.plugin.storage.rooms.get(this.options.roomId);
     if (!room || generation !== this.renderGeneration) return;
+    this.updateParticipantStatuses(room);
 
     const liveEvents = this.getLiveAssistantEvents(room);
     const allEvents = [...room.events, ...liveEvents]
@@ -439,19 +479,23 @@ export class CollaborationTimeline {
     }
 
     for (const event of events) {
+      const isParticipant = event.authorId !== 'user' && event.authorId !== 'system';
       const messageEl = this.timelineEl.createDiv({
         cls: [
           'claudian-collaboration-message',
           `claudian-collaboration-message--${event.authorId === 'user' ? 'user' : 'agent'}`,
+          isParticipant ? 'claudian-collaboration-message--participant' : '',
+          event.id.startsWith('live-') ? 'is-live' : '',
         ].join(' '),
         attr: {
           'data-author': event.authorId,
           'data-event-id': event.id,
+          ...(isParticipant
+            ? { 'data-identity': String(this.getParticipantIdentityIndex(event.authorId)) }
+            : {}),
         },
       });
-      messageEl.createDiv({
-        cls: 'claudian-collaboration-author',
-        text: event.authorId === 'user'
+      const authorLabel = event.authorId === 'user'
           ? 'You'
           : event.authorId === 'system' && event.deliberationPhase
             ? `Deliberation · ${event.deliberationPhase}`
@@ -460,8 +504,36 @@ export class CollaborationTimeline {
             : [
               this.getParticipantLabel(event.authorId),
               event.deliberationPhase ?? event.workflow?.phase,
-            ].filter(Boolean).join(' · '),
+            ].filter(Boolean).join(' · ');
+      const authorEl = messageEl.createDiv({
+        cls: 'claudian-collaboration-author',
       });
+      if (isParticipant) {
+        authorEl.createSpan({
+          cls: 'claudian-collaboration-author-mark',
+          text: this.getParticipantInitials(event.authorId),
+          attr: { 'aria-hidden': 'true' },
+        });
+        authorEl.createSpan({
+          cls: 'claudian-collaboration-author-name',
+          text: this.getParticipantLabel(event.authorId),
+        });
+        const phase = event.deliberationPhase ?? event.workflow?.phase;
+        if (phase) {
+          authorEl.createSpan({
+            cls: 'claudian-collaboration-author-phase',
+            text: formatActivityPhase(phase) ?? phase,
+          });
+        }
+        if (event.id.startsWith('live-')) {
+          authorEl.createSpan({
+            cls: 'claudian-collaboration-author-live',
+            text: 'Working',
+          });
+        }
+      } else {
+        authorEl.setText(authorLabel);
+      }
       const contentEl = messageEl.createDiv({
         cls: 'claudian-collaboration-content',
         attr: { dir: 'auto' },
@@ -1363,22 +1435,27 @@ export class CollaborationTimeline {
     });
   }
 
-  private updateParticipantStatuses(): void {
+  private updateParticipantStatuses(room: CollaborationRoom): void {
+    const phase = this.getCurrentActivityPhase(room);
     for (const tab of this.options.participantTabs) {
       const participantId = this.getTabParticipantId(tab);
       const statusEl = this.statusEls.get(participantId);
       if (!statusEl) continue;
-      const status = tab.state.needsAttention
-        ? 'attention'
-        : tab.state.isStreaming
-          ? 'streaming'
-          : 'idle';
-      statusEl.dataset.status = status;
-      statusEl.setAttribute('title', `${this.getParticipantLabel(participantId)}: ${status}`);
+      const activity = resolveParticipantActivity({
+        isStreaming: tab.state.isStreaming,
+        needsAttention: tab.state.needsAttention,
+        deliveryStatus: this.getLatestDeliveryStatus(room, participantId),
+        phase,
+      });
+      const detail = [activity.label, activity.stage].filter(Boolean).join(' · ');
+      statusEl.dataset.status = activity.state;
+      statusEl.setText(detail);
+      statusEl.setAttribute('title', `${this.getParticipantLabel(participantId)}: ${detail}`);
       const recipientButton = statusEl.parentElement;
+      recipientButton?.setAttribute('data-status', activity.state);
       recipientButton?.setAttribute(
         'aria-label',
-        `${this.getParticipantLabel(participantId)}, ${status}`,
+        `${this.getParticipantLabel(participantId)}, ${detail}`,
       );
       const stopButton = this.stopEls.get(participantId);
       const canStop = this.options.canStop(participantId);
@@ -1412,7 +1489,13 @@ export class CollaborationTimeline {
                 stale ? ' (stale)' : ''
               }`
               : 'No provider snapshot',
-            policy?.quotaRefreshError ? `Last refresh failed: ${policy.quotaRefreshError}` : '',
+            policy?.quotaRefreshError
+              ? `Last refresh failed: ${policy.quotaRefreshError}${
+                policy.quotaNextRetryAt
+                  ? ` · retry ${new Date(policy.quotaNextRetryAt).toLocaleTimeString()}`
+                  : ''
+              }`
+              : '',
             contextUsage
               ? `${contextUsage.contextTokens.toLocaleString()} context tokens`
               : persistedUsage
@@ -1422,6 +1505,27 @@ export class CollaborationTimeline {
         );
       }
     }
+  }
+
+  private getCurrentActivityPhase(
+    room: CollaborationRoom,
+  ): CollaborationActivityPhase | undefined {
+    const latestTurn = [...room.events].reverse().find(event => (
+      event.authorId === 'user'
+      || event.deliberationPhase !== undefined
+      || event.workflow !== undefined
+    ));
+    return latestTurn?.deliberationPhase ?? latestTurn?.workflow?.phase;
+  }
+
+  private getLatestDeliveryStatus(
+    room: CollaborationRoom,
+    participantId: string,
+  ): CollaborationDeliveryStatus | undefined {
+    return [...room.events].reverse()
+      .find(event => event.delivery[participantId])
+      ?.delivery[participantId]
+      ?.status;
   }
 
   private getResourceLabel(
@@ -1461,5 +1565,18 @@ export class CollaborationTimeline {
   private getParticipantLabel(participantId: string): string {
     return this.options.participantLabels[participantId]
       ?? getFallbackParticipantLabel(participantId);
+  }
+
+  private getParticipantIdentityIndex(participantId: string): number {
+    const participantIds = Object.keys(this.options.participantLabels);
+    const index = participantIds.indexOf(participantId);
+    return index < 0 ? 0 : index % 4;
+  }
+
+  private getParticipantInitials(participantId: string): string {
+    const words = this.getParticipantLabel(participantId)
+      .split(/\s+/)
+      .filter(Boolean);
+    return words.slice(0, 2).map(word => word.charAt(0).toUpperCase()).join('');
   }
 }

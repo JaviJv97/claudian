@@ -100,3 +100,29 @@
   color: var(--claudian-brand);
   font-weight: 500;
 }
+
+.claudian-model-custom-form {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.claudian-model-custom-input {
+  width: 170px;
+  min-width: 0;
+  padding: 4px 6px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+}
+
+.claudian-model-custom-input[aria-invalid="true"] {
+  border-color: var(--text-error);
+}
+
+.claudian-model-custom-submit {
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}

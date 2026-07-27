@@ -174,6 +174,26 @@
   transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
 
+.claudian-collaboration-recipient[data-identity="0"],
+.claudian-collaboration-message[data-identity="0"] {
+  --claudian-participant-color: var(--color-purple);
+}
+
+.claudian-collaboration-recipient[data-identity="1"],
+.claudian-collaboration-message[data-identity="1"] {
+  --claudian-participant-color: var(--color-green);
+}
+
+.claudian-collaboration-recipient[data-identity="2"],
+.claudian-collaboration-message[data-identity="2"] {
+  --claudian-participant-color: var(--color-orange);
+}
+
+.claudian-collaboration-recipient[data-identity="3"],
+.claudian-collaboration-message[data-identity="3"] {
+  --claudian-participant-color: var(--color-blue);
+}
+
 .claudian-collaboration-recipient:hover,
 .claudian-collaboration-recipient:focus-visible {
   color: var(--text-normal);
@@ -186,19 +206,86 @@
   background: var(--background-secondary);
 }
 
-.claudian-collaboration-status {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  border-radius: 50%;
-  background: var(--text-faint);
+.claudian-collaboration-recipient[data-provider]:not([data-provider="all"]) {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 7px;
+  justify-items: start;
+  line-height: 1.15;
 }
 
-.claudian-collaboration-status[data-status="streaming"] {
-  background: var(--interactive-accent);
+.claudian-collaboration-recipient[data-provider]:not([data-provider="all"])::before {
+  width: 7px;
+  height: 7px;
+  grid-row: 1 / 3;
+  align-self: center;
+  border-radius: 50%;
+  background: var(--claudian-participant-color);
+  content: "";
+}
+
+.claudian-collaboration-recipient[data-status="working"] {
+  border-color: color-mix(
+    in srgb,
+    var(--claudian-participant-color) 30%,
+    var(--background-modifier-border)
+  );
+  background: color-mix(
+    in srgb,
+    var(--claudian-participant-color) 7%,
+    var(--background-primary)
+  );
+}
+
+.claudian-collaboration-status {
+  display: inline-flex;
+  grid-column: 2;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.claudian-collaboration-status::before {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  content: "";
+}
+
+.claudian-collaboration-status[data-status="working"] {
+  color: var(--text-muted);
+}
+
+.claudian-collaboration-status[data-status="working"]::before {
+  width: 8px;
+  height: 8px;
+  flex-basis: 8px;
+  border: 1.5px solid color-mix(
+    in srgb,
+    var(--claudian-participant-color) 28%,
+    transparent
+  );
+  border-top-color: var(--claudian-participant-color);
+  background: transparent;
+  animation: claudian-collaboration-spin 800ms linear infinite;
+}
+
+.claudian-collaboration-status[data-status="queued"]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-faint);
 }
 
 .claudian-collaboration-status[data-status="attention"] {
+  color: var(--text-error);
+}
+
+.claudian-collaboration-status[data-status="attention"]::before {
   background: var(--text-error);
   box-shadow: 0 0 0 2px rgba(var(--color-red-rgb), 0.16);
 }
@@ -234,6 +321,43 @@
 .claudian-collaboration-message {
   width: 100%;
   max-width: 100%;
+  flex: 0 0 auto;
+}
+
+.claudian-collaboration-message--participant {
+  position: relative;
+  overflow: clip;
+  padding: 11px 13px 12px;
+  border-radius: var(--radius-m);
+  background: color-mix(
+    in srgb,
+    var(--claudian-participant-color) 5%,
+    var(--background-primary)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(
+      in srgb,
+      var(--claudian-participant-color) 24%,
+      var(--background-modifier-border)
+    ),
+    0 1px 2px rgb(0 0 0 / 7%);
+}
+
+.claudian-collaboration-message--participant.is-live::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--claudian-participant-color) 48%,
+    transparent 100%
+  );
+  content: "";
+  transform: translateX(-65%);
+  animation: claudian-collaboration-progress 1.5s ease-in-out infinite;
 }
 
 .claudian-collaboration-message--user {
@@ -245,6 +369,9 @@
 }
 
 .claudian-collaboration-author {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin-bottom: 4px;
   color: var(--text-muted);
   font-size: 11px;
@@ -253,6 +380,52 @@
 
 .claudian-collaboration-message--agent .claudian-collaboration-author {
   color: var(--text-normal);
+}
+
+.claudian-collaboration-author-mark {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(
+    in srgb,
+    var(--claudian-participant-color) 16%,
+    var(--background-secondary)
+  );
+  color: var(--claudian-participant-color);
+  font-size: 9px;
+  font-weight: var(--font-semibold);
+  letter-spacing: -0.01em;
+}
+
+.claudian-collaboration-author-name {
+  font-weight: var(--font-semibold);
+}
+
+.claudian-collaboration-author-phase,
+.claudian-collaboration-author-live {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: var(--font-normal);
+}
+
+.claudian-collaboration-author-phase::before,
+.claudian-collaboration-author-live::before {
+  margin-inline-end: 7px;
+  color: var(--background-modifier-border-hover);
+  content: "·";
+}
+
+.claudian-collaboration-author-live {
+  margin-inline-start: auto;
+  color: var(--claudian-participant-color);
+}
+
+.claudian-collaboration-author-live::before {
+  display: none;
 }
 
 .claudian-collaboration-content {
@@ -275,6 +448,23 @@
 
 .claudian-collaboration-content > :last-child {
   margin-bottom: 0;
+}
+
+@keyframes claudian-collaboration-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes claudian-collaboration-progress {
+  0% {
+    transform: translateX(-65%);
+  }
+
+  50%,
+  100% {
+    transform: translateX(65%);
+  }
 }
 
 .claudian-collaboration-delivery {

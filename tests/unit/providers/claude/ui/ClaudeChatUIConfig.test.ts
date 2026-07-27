@@ -6,6 +6,27 @@ describe('claudeChatUIConfig', () => {
     expect(claudeChatUIConfig.getDefaultReasoningValue('custom-model', {})).toBe('high');
   });
 
+  describe('addCustomModel', () => {
+    it('persists and returns a live custom model selection', () => {
+      const settings: Record<string, unknown> = {
+        providerConfigs: { claude: { customModels: '' } },
+      };
+
+      expect(claudeChatUIConfig.addCustomModel?.(' claude-opus-5 ', settings))
+        .toBe('claude-opus-5');
+      expect(claudeChatUIConfig.getModelOptions(settings).at(-1)).toEqual({
+        value: 'claude-code/claude-opus-5',
+        label: 'Opus 5',
+        description: 'Custom model',
+      });
+    });
+
+    it('rejects multiline model IDs', () => {
+      expect(() => claudeChatUIConfig.addCustomModel?.('opus\nsonnet', {}))
+        .toThrow('Enter a valid Claude model ID');
+    });
+  });
+
   describe('getModelOptions', () => {
     it('appends settings-defined custom models after the built-in options', () => {
       const options = claudeChatUIConfig.getModelOptions({

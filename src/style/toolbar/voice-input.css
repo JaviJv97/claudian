@@ -1,0 +1,68 @@
+.claudian-voice-input {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: auto;
+}
+
+.claudian-voice-input-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.claudian-voice-input-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.claudian-voice-input-btn:hover,
+.claudian-voice-input-btn:focus-visible {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.claudian-voice-input-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.claudian-voice-input-btn.is-recording {
+  background: color-mix(in srgb, var(--text-error) 14%, transparent);
+  color: var(--text-error);
+}
+
+.claudian-voice-input-btn.is-transcribing {
+  color: var(--interactive-accent);
+}
+
+.claudian-voice-input-btn.is-transcribing svg {
+  animation: claudian-voice-spin 900ms linear infinite;
+}
+
+.claudian-voice-input-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+@keyframes claudian-voice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .claudian-voice-input-btn.is-transcribing svg {
+    animation: none;
+  }
+}

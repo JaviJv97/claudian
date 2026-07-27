@@ -140,6 +140,8 @@ export interface CollaborationParticipantResourcePolicy {
   /** Bounded, credential-free samples used for local trends and projections. */
   quotaHistory?: CollaborationQuotaHistoryPoint[];
   quotaRefreshError?: string;
+  /** Automatic refresh backoff deadline after repeated provider failures. */
+  quotaNextRetryAt?: number;
 }
 
 export interface CollaborationQuotaHistoryPoint {

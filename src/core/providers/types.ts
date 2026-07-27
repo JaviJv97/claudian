@@ -299,6 +299,13 @@ export interface ProviderChatUIConfig {
   /** Model options for the selector dropdown. Provider extracts what it needs from the settings bag. */
   getModelOptions(settings: Record<string, unknown>): ProviderUIOption[];
 
+  /**
+   * Adds an opaque provider model ID to the selector catalog.
+   * Providers that implement this expose inline custom-model entry in chat.
+   * Returns the normalized selector value that should become active.
+   */
+  addCustomModel?(model: string, settings: unknown): string;
+
   /** Semantic default model, independent from selector display order. */
   getDefaultModel?(settings: Record<string, unknown>): string | null;
 

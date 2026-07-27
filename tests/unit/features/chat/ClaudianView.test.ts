@@ -4,11 +4,16 @@ import { Platform, Scope } from 'obsidian';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { ClaudianView } from '@/features/chat/ClaudianView';
+import { chooseCollaborationParticipants } from '@/features/chat/collaboration/CollaborationRoomModal';
 
 const mockTabManagerConstructor = jest.fn();
 jest.mock('@/features/chat/tabs/TabManager', () => ({
   TabManager: jest.fn().mockImplementation((...args: unknown[]) =>
     mockTabManagerConstructor(...args)),
+}));
+jest.mock('@/features/chat/collaboration/CollaborationRoomModal', () => ({
+  ...jest.requireActual('@/features/chat/collaboration/CollaborationRoomModal'),
+  chooseCollaborationParticipants: jest.fn(),
 }));
 
 const MockScope = Scope as typeof Scope & { instances: Scope[] };
@@ -116,6 +121,220 @@ describe('ClaudianView model refresh routing', () => {
     expect(blankGrokTab.ui.modelSelector.renderOptions).toHaveBeenCalled();
     expect(view.tabManager.reconcileProviderAvailability).toHaveBeenCalledTimes(1);
     expect(primeProviderRuntime).not.toHaveBeenCalled();
+  });
+});
+
+describe('ClaudianView collaboration quota refresh', () => {
+  it('records a quota error without resetting or replacing the participant runtime', async () => {
+    const quotaError = new Error('Quota endpoint unavailable');
+    const runtime = {
+      ensureReady: jest.fn().mockResolvedValue(false),
+      getQuotaSnapshot: jest.fn().mockRejectedValue(quotaError),
+      resetSession: jest.fn(),
+      runtimeProfileId: 'personal',
+    };
+    const participant = {
+      id: 'claude-personal',
+      providerId: 'claude',
+      conversationId: 'conversation-1',
+      label: 'Claude Personal',
+      runtimeProfileId: 'personal',
+      resourcePolicy: { mode: 'active' },
+    };
+    const room = {
+      id: 'room-1',
+      participants: [participant],
+    };
+    const updateParticipantResourcePolicy = jest.fn().mockResolvedValue(undefined);
+    const view = Object.create(ClaudianView.prototype) as any;
+    view.plugin = {
+      storage: {
+        rooms: {
+          get: jest.fn().mockResolvedValue(room),
+          updateParticipantResourcePolicy,
+        },
+      },
+    };
+    view.tabManager = {
+      getAllTabs: jest.fn().mockReturnValue([{
+        conversationId: 'conversation-1',
+        service: runtime,
+        serviceInitialized: true,
+      }]),
+    };
+    view.quotaRefreshBackoff = new Map();
+    view.quotaRefreshFlights = new Map();
+
+    await expect(view.refreshCollaborationParticipantQuota(
+      'room-1',
+      'claude-personal',
+      false,
+    )).rejects.toThrow('Quota endpoint unavailable');
+
+    expect(runtime.ensureReady).toHaveBeenCalledTimes(1);
+    expect(runtime.getQuotaSnapshot).toHaveBeenCalledTimes(1);
+    expect(runtime.resetSession).not.toHaveBeenCalled();
+    expect(updateParticipantResourcePolicy).toHaveBeenCalledWith(
+      'room-1',
+      'claude-personal',
+      expect.objectContaining({ quotaRefreshError: 'Quota endpoint unavailable' }),
+    );
+
+    await expect(view.refreshCollaborationParticipantQuota(
+      'room-1',
+      'claude-personal',
+      false,
+    )).resolves.toBeUndefined();
+    expect(runtime.getQuotaSnapshot).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ClaudianView collaboration turn queue', () => {
+  it('holds a follow-up until every active room delivery finishes', async () => {
+    const view = Object.create(ClaudianView.prototype) as any;
+    view.activeCollaborationDeliveries = new Map([
+      ['room-1:claude-company', 'event-1'],
+    ]);
+    view.queuedCollaborationMessages = new Map();
+    view.routeCollaborationMessage = jest.fn().mockResolvedValue(true);
+
+    view.queueCollaborationMessage('room-1', {
+      originTabId: 'tab-1',
+      content: 'Additional context',
+    });
+    await view.drainNextCollaborationMessage('room-1');
+
+    expect(view.routeCollaborationMessage).not.toHaveBeenCalled();
+
+    view.activeCollaborationDeliveries.clear();
+    await view.drainNextCollaborationMessage('room-1');
+
+    expect(view.routeCollaborationMessage).toHaveBeenCalledWith(
+      'tab-1',
+      'Additional context',
+      undefined,
+    );
+    expect(view.queuedCollaborationMessages.has('room-1')).toBe(false);
+  });
+
+  it('dispatches queued follow-ups one at a time', async () => {
+    const view = Object.create(ClaudianView.prototype) as any;
+    view.activeCollaborationDeliveries = new Map();
+    view.queuedCollaborationMessages = new Map();
+    view.routeCollaborationMessage = jest.fn().mockImplementation(async (
+      _tabId: string,
+      content: string,
+    ) => {
+      view.activeCollaborationDeliveries.set('room-1:codex', content);
+      return true;
+    });
+
+    view.queueCollaborationMessage('room-1', {
+      originTabId: 'tab-1',
+      content: 'First',
+    });
+    view.queueCollaborationMessage('room-1', {
+      originTabId: 'tab-1',
+      content: 'Second',
+    });
+
+    await view.drainNextCollaborationMessage('room-1');
+
+    expect(view.routeCollaborationMessage).toHaveBeenCalledTimes(1);
+    expect(view.routeCollaborationMessage).toHaveBeenCalledWith('tab-1', 'First', undefined);
+    expect(view.queuedCollaborationMessages.get('room-1')).toHaveLength(1);
+  });
+});
+
+describe('ClaudianView collaboration room capacity', () => {
+  it('reuses the initial blank agent tab when opening a three-participant room', async () => {
+    jest.spyOn(ProviderRegistry, 'isEnabled').mockReturnValue(true);
+    jest.spyOn(ProviderRegistry, 'getRuntimeProfiles').mockReturnValue([
+      { id: 'personal', label: 'Claude Personal', available: true },
+      { id: 'company', label: 'Claude Company', available: true },
+    ]);
+    (chooseCollaborationParticipants as jest.Mock).mockResolvedValue({
+      title: 'Build room',
+      participants: [
+        {
+          id: 'claude-personal',
+          providerId: 'claude',
+          label: 'Claude Personal',
+          runtimeProfileId: 'personal',
+        },
+        {
+          id: 'claude-company',
+          providerId: 'claude',
+          label: 'Claude Company',
+          runtimeProfileId: 'company',
+        },
+        { id: 'codex', providerId: 'codex', label: 'Codex' },
+      ],
+    });
+
+    const blankTab: any = {
+      conversationId: null,
+      controllers: {
+        conversationController: {
+          createNew: jest.fn().mockResolvedValue(undefined),
+        },
+      },
+      id: 'blank-tab',
+      lifecycleState: 'blank',
+      state: { isRewinding: false, isStreaming: false },
+    };
+    const createdTabs: any[] = [];
+    const openConversation = jest.fn(async (conversationId: string) => {
+      blankTab.conversationId = conversationId;
+      blankTab.lifecycleState = 'bound_cold';
+    });
+    const createTab = jest.fn(async (conversationId: string) => {
+      const tab = { id: `created-${createdTabs.length}`, conversationId };
+      createdTabs.push(tab);
+      return tab;
+    });
+    const roomCreate = jest.fn().mockResolvedValue(undefined);
+    let conversationIndex = 0;
+    const view = Object.create(ClaudianView.prototype) as any;
+    Object.assign(view, {
+      app: {},
+      plugin: {
+        app: {},
+        createConversation: jest.fn(async ({ providerId, runtimeProfileId }) => ({
+          id: `conversation-${conversationIndex++}`,
+          providerId,
+          runtimeProfileId,
+        })),
+        deleteConversation: jest.fn().mockResolvedValue(undefined),
+        settings: { maxTabs: 3 },
+        storage: {
+          rooms: {
+            create: roomCreate,
+            delete: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        updateConversation: jest.fn().mockResolvedValue(undefined),
+      },
+      reconcileCollaborationTimelines: jest.fn().mockResolvedValue(undefined),
+      tabManager: {
+        createTab,
+        getAllTabs: jest.fn().mockReturnValue([blankTab]),
+        getTab: jest.fn().mockReturnValue(blankTab),
+        getTabCount: jest.fn().mockReturnValue(1),
+        openConversation,
+        switchToTab: jest.fn().mockResolvedValue(undefined),
+      },
+      updateTabBarVisibility: jest.fn(),
+    });
+
+    await expect(view.startClaudeCodexCollaboration()).resolves.toBe(true);
+
+    expect(openConversation).toHaveBeenCalledWith(
+      'conversation-0',
+      expect.objectContaining({ preferNewTab: false }),
+    );
+    expect(createTab).toHaveBeenCalledTimes(2);
+    expect(roomCreate).toHaveBeenCalledTimes(1);
   });
 });
 
