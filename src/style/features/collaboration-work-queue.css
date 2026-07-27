@@ -193,3 +193,28 @@
   margin: var(--size-4-1) 0 0;
   padding-inline-start: var(--size-4-4);
 }
+
+.claudian-collaboration-work-queue-history {
+  margin-top: var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-work-queue-history summary {
+  cursor: pointer;
+}
+
+.claudian-collaboration-work-queue-history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-1);
+  padding-top: var(--size-4-1);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.claudian-collaboration-work-queue-history-row span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

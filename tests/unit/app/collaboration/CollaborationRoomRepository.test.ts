@@ -111,6 +111,39 @@ describe('CollaborationRoomRepository', () => {
     expect((await repository.get('room-1'))?.workQueue?.updatedAt).toBe(110);
   });
 
+  it('preserves an accepted queue before starting a later deliberation queue', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({ id: 'room-1', title: 'Room', participants: [], now: 100 });
+    const first = {
+      ...createQueue(110),
+      sourceDeliberationId: 'delib-1',
+      status: 'completed' as const,
+      completionApprovedAt: 111,
+    };
+    await repository.updateWorkQueue('room-1', first);
+
+    const second = {
+      ...createQueue(120),
+      sourceDeliberationId: 'delib-2',
+      status: 'draft' as const,
+    };
+    const updated = await repository.updateWorkQueue('room-1', second);
+
+    expect(updated.workQueue).toEqual(second);
+    expect(updated.workQueueHistory).toEqual([first]);
+  });
+
+  it('does not overwrite an unfinished queue with a later deliberation', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({ id: 'room-1', title: 'Room', participants: [], now: 100 });
+    await repository.updateWorkQueue('room-1', createQueue(110));
+
+    await expect(repository.updateWorkQueue('room-1', {
+      ...createQueue(120),
+      sourceDeliberationId: 'delib-2',
+    })).rejects.toThrow('finish the current work queue');
+  });
+
   it('updates one participant delivery without replacing the others', async () => {
     const repository = new CollaborationRoomRepository(createAdapter());
     await repository.create({

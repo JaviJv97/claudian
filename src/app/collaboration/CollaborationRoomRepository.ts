@@ -236,6 +236,17 @@ export class CollaborationRoomRepository {
   ): Promise<CollaborationRoom> {
     return this.mutate(roomId, (room) => {
       if (
+        expectedQueueUpdatedAt === undefined
+        && room.workQueue
+        && room.workQueue.sourceDeliberationId !== workQueue.sourceDeliberationId
+      ) {
+        if (!room.workQueue.completionApprovedAt) {
+          throw new Error('Approve or finish the current work queue before creating another.');
+        }
+        room.workQueueHistory ??= [];
+        room.workQueueHistory.push(structuredClone(room.workQueue));
+      }
+      if (
         expectedQueueUpdatedAt !== undefined
         && room.workQueue?.updatedAt !== expectedQueueUpdatedAt
       ) {

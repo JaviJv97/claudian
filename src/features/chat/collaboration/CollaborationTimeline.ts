@@ -510,17 +510,23 @@ export class CollaborationTimeline {
           candidate.workflow?.deliberationId === event.deliberationId
         ));
         if (outcome.status !== 'rejected' && !workflowStarted) {
+          const matchingQueue = room.workQueue?.sourceDeliberationId === event.deliberationId;
+          const unfinishedQueue = Boolean(
+            room.workQueue && !room.workQueue.completionApprovedAt && !matchingQueue,
+          );
           const startButton = statusEl.createEl('button', {
             cls: 'claudian-collaboration-start-plan',
-            text: room.workQueue?.sourceDeliberationId === event.deliberationId
+            text: matchingQueue
               ? 'Queue created'
+              : unfinishedQueue
+                ? 'Queue in progress'
               : 'Create task queue',
             attr: {
               type: 'button',
               'aria-label': 'Create a reviewable task queue from the approved plan',
             },
           });
-          startButton.disabled = room.workQueue?.sourceDeliberationId === event.deliberationId;
+          startButton.disabled = matchingQueue || unfinishedQueue;
           startButton.addEventListener('click', () => {
             startButton.disabled = true;
             startButton.setText('Creating…');
@@ -674,7 +680,11 @@ export class CollaborationTimeline {
       cls: 'claudian-collaboration-work-queue-summary',
       text: `${queue.tasks.filter(task => task.status === 'ready').length} ready · ${
         queue.tasks.filter(task => task.status === 'blocked').length
-      } blocked · ${queue.tasks.filter(task => task.status === 'done').length} done`,
+      } blocked · ${queue.tasks.filter(task => task.status === 'done').length} done${
+        room.workQueueHistory?.length
+          ? ` · ${room.workQueueHistory.length} archived`
+          : ''
+      }`,
     });
     if (queue.status === 'approved' || queue.status === 'paused') {
       const pause = header.createEl('button', {
@@ -958,6 +968,29 @@ export class CollaborationTimeline {
             )).join(' · '),
           });
         }
+      }
+    }
+    if (room.workQueueHistory?.length) {
+      const history = panel.createEl('details', {
+        cls: 'claudian-collaboration-work-queue-history',
+      });
+      history.createEl('summary', {
+        text: `${room.workQueueHistory.length} archived queue${
+          room.workQueueHistory.length === 1 ? '' : 's'
+        }`,
+      });
+      for (const archived of [...room.workQueueHistory].reverse()) {
+        const row = history.createDiv({
+          cls: 'claudian-collaboration-work-queue-history-row',
+        });
+        row.createSpan({ text: archived.sourceDeliberationId });
+        row.createSpan({
+          text: `${archived.tasks.length} tasks · ${
+            archived.completionApprovedAt
+              ? new Date(archived.completionApprovedAt).toLocaleDateString()
+              : archived.status
+          }`,
+        });
       }
     }
     if (queue.status === 'draft') {

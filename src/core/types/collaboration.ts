@@ -212,4 +212,5 @@ export interface CollaborationRoom {
   participants: CollaborationParticipant[];
   events: CollaborationEvent[];
   workQueue?: CollaborationWorkQueue;
+  workQueueHistory?: CollaborationWorkQueue[];
 }
