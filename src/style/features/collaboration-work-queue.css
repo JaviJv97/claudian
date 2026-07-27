@@ -274,3 +274,31 @@
   color: var(--text-error);
   font-size: var(--font-ui-smaller);
 }
+
+@container claudian-collaboration (max-width: 520px) {
+  .claudian-collaboration-work-queue {
+    min-width: 0;
+    margin-inline: 0;
+    padding: var(--size-4-2);
+  }
+
+  .claudian-collaboration-work-queue-header,
+  .claudian-collaboration-work-task-top,
+  .claudian-collaboration-work-queue-recommendation {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .claudian-collaboration-work-task-assignment,
+  .claudian-collaboration-work-task-contract-compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .claudian-collaboration-work-task-contract-editor textarea,
+  .claudian-collaboration-work-task-contract-compact select,
+  .claudian-collaboration-work-task-contract-compact input {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}

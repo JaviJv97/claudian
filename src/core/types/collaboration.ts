@@ -91,12 +91,15 @@ export interface CollaborationWorkQueue {
 }
 
 export interface CollaborationDeliberationOutcome {
-  status: 'unanimous' | 'approved-with-concerns' | 'rejected';
+  status: 'unanimous' | 'approved-with-concerns' | 'rejected' | 'incomplete';
   approvals: string[];
   objections: string[];
   concerns: string[];
   missing: string[];
   synthesisEventId?: string;
+  /** Present when infrastructure interrupted a phase before deliberation completed. */
+  interruptedPhase?: CollaborationDeliberationPhase;
+  interruptionReason?: 'failed' | 'cancelled' | 'missing-response';
 }
 
 export interface CollaborationWorkflowMetadata {

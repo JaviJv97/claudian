@@ -106,6 +106,19 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export function getAvailableReviewParticipantIds(
+  participantIds: readonly string[],
+  sourceParticipantId: string,
+  resourcePolicies: Readonly<
+    Record<string, CollaborationParticipantResourcePolicy | undefined>
+  >,
+): string[] {
+  return [...new Set(participantIds)].filter(participantId => (
+    participantId !== sourceParticipantId
+    && resourcePolicies[participantId]?.mode !== 'unavailable'
+  ));
+}
+
 type CollaborationActivityPhase =
   | CollaborationDeliberationPhase
   | CollaborationWorkflowPhase;
@@ -569,22 +582,41 @@ export class CollaborationTimeline {
             ? 'Unanimous'
             : outcome.status === 'approved-with-concerns'
               ? 'Approved with concerns'
-              : 'Not approved',
+              : outcome.status === 'incomplete'
+                ? 'Incomplete'
+                : 'Not approved',
         });
         statusEl.createSpan({
           cls: 'claudian-collaboration-outcome-votes',
-          text: `${outcome.approvals.length}/${
-            new Set([
-              ...outcome.approvals,
-              ...outcome.objections,
-              ...outcome.missing,
-            ]).size
-          } approvals`,
+          text: outcome.status === 'incomplete'
+            ? `${
+              outcome.interruptedPhase
+                ? `${outcome.interruptedPhase[0].toUpperCase()}${
+                  outcome.interruptedPhase.slice(1)
+                }`
+                : 'Deliberation'
+            } · ${
+              outcome.interruptionReason === 'cancelled'
+                ? 'cancelled'
+                : outcome.interruptionReason === 'failed'
+                  ? 'provider failure'
+                  : 'response missing'
+            }`
+            : `${outcome.approvals.length}/${
+              new Set([
+                ...outcome.approvals,
+                ...outcome.objections,
+                ...outcome.missing,
+              ]).size
+            } approvals`,
         });
         const workflowStarted = room.events.some(candidate => (
           candidate.workflow?.deliberationId === event.deliberationId
         ));
-        if (outcome.status !== 'rejected' && !workflowStarted) {
+        if (
+          (outcome.status === 'unanimous' || outcome.status === 'approved-with-concerns')
+          && !workflowStarted
+        ) {
           const matchingQueue = room.workQueue?.sourceDeliberationId === event.deliberationId;
           const unfinishedQueue = Boolean(
             room.workQueue && !room.workQueue.completionApprovedAt && !matchingQueue,
@@ -716,14 +748,21 @@ export class CollaborationTimeline {
         }
       }
       if (event.authorId !== 'user' && event.authorId !== 'system') {
-        const reviewer = this.options.participantTabs
-          .map(tab => this.getTabParticipantId(tab))
-          .find(participantId => participantId !== event.authorId);
-        if (reviewer) {
+        const reviewers = getAvailableReviewParticipantIds(
+          this.options.participantTabs.map(tab => this.getTabParticipantId(tab)),
+          String(event.authorId),
+          this.options.participantResourcePolicies,
+        );
+        for (const reviewer of reviewers) {
           const reviewButton = messageEl.createEl('button', {
             cls: 'claudian-collaboration-review',
             text: `Ask ${this.getParticipantLabel(reviewer)} to review`,
-            attr: { type: 'button' },
+            attr: {
+              type: 'button',
+              'aria-label': `Ask ${this.getParticipantLabel(reviewer)} to review ${
+                this.getParticipantLabel(String(event.authorId))
+              }`,
+            },
           });
           reviewButton.addEventListener('click', () => {
             void this.options.onReview(reviewer, event.authorId, event.content);

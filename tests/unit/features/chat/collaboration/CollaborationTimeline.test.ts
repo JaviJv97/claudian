@@ -1,6 +1,28 @@
 import {
+  getAvailableReviewParticipantIds,
   resolveParticipantActivity,
 } from '@/features/chat/collaboration/CollaborationTimeline';
+
+describe('getAvailableReviewParticipantIds', () => {
+  it('offers every other available account without collapsing same-provider profiles', () => {
+    expect(getAvailableReviewParticipantIds(
+      ['claude-personal', 'claude-company', 'codex', 'claude-company'],
+      'codex',
+      {
+        'claude-personal': { mode: 'active' },
+        'claude-company': { mode: 'preserve' },
+      },
+    )).toEqual(['claude-personal', 'claude-company']);
+  });
+
+  it('excludes the source account and unavailable reviewers', () => {
+    expect(getAvailableReviewParticipantIds(
+      ['claude-personal', 'claude-company', 'codex'],
+      'claude-personal',
+      { 'claude-company': { mode: 'unavailable' } },
+    )).toEqual(['codex']);
+  });
+});
 
 describe('resolveParticipantActivity', () => {
   it('shows the live deliberation stage while an agent is working', () => {

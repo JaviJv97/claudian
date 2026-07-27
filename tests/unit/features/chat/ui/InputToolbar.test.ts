@@ -212,6 +212,42 @@ describe('ModelSelector', () => {
     expect(label?.textContent).toBe('Sonnet');
   });
 
+  it('identifies which participant owns the visible model selector', () => {
+    selector = new ModelSelector(parentEl, {
+      ...callbacks,
+      getModelScopeLabel: jest.fn().mockReturnValue('Claude Company'),
+    });
+
+    const btn = parentEl.querySelectorAll('.claudian-model-btn').at(-1);
+    expect(btn?.querySelector('.claudian-model-scope')?.textContent)
+      .toBe('Claude Company');
+    expect(btn?.getAttribute('aria-label')).toBe('Claude Company model: Sonnet');
+    expect(btn?.getAttribute('title')).toBe('Model for Claude Company: Sonnet');
+    expect(
+      parentEl.querySelectorAll('.claudian-model-dropdown').at(-1)
+        ?.querySelector('.claudian-model-scope-heading')?.textContent,
+    ).toBe('Models for Claude Company');
+  });
+
+  it('exposes the model picker and options to keyboard navigation', async () => {
+    const btn = parentEl.querySelector('.claudian-model-btn');
+    const sonnet = parentEl.querySelectorAll('.claudian-model-option')
+      .find((option: any) => option.children[0]?.textContent === 'Sonnet');
+
+    expect(btn?.tagName).toBe('BUTTON');
+    expect(btn?.getAttribute('aria-haspopup')).toBe('listbox');
+    expect(sonnet?.getAttribute('role')).toBe('option');
+    expect(sonnet?.getAttribute('tabindex')).toBe('0');
+    expect(sonnet?.getAttribute('aria-selected')).toBe('true');
+
+    await sonnet?.dispatchEvent('keydown', {
+      key: 'Enter',
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    });
+    expect(callbacks.onModelChange).toHaveBeenCalledWith('sonnet');
+  });
+
   it('should display the selected provider icon before the model label', () => {
     const providerIcon = {
       kind: 'path' as const,

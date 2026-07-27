@@ -1,12 +1,18 @@
 .claudian-collaboration {
   display: flex;
+  width: 100%;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
+  container-name: claudian-collaboration;
+  container-type: inline-size;
 }
 
 .claudian-collaboration-controls {
   flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
@@ -15,13 +21,16 @@
   display: flex;
   min-height: 44px;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px 8px;
 }
 
 .claudian-collaboration-roster {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: 32px;
+  min-width: 0;
   align-items: center;
   gap: 8px;
   padding: 6px 10px 0;
@@ -35,6 +44,7 @@
 }
 
 .claudian-collaboration-roster-members {
+  min-width: 0;
   overflow: hidden;
   color: var(--text-normal);
   text-overflow: ellipsis;
@@ -43,7 +53,6 @@
 
 .claudian-collaboration-usage-overview {
   min-height: 28px;
-  margin-inline-start: auto;
   padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-s);
@@ -59,8 +68,12 @@
 }
 
 .claudian-collaboration-modes {
-  display: inline-flex;
-  flex: 0 0 auto;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--background-modifier-border);
@@ -96,13 +109,17 @@
 }
 
 .claudian-collaboration-mode {
+  min-width: 0;
   min-height: 28px;
+  overflow: hidden;
   padding: 3px 8px;
   border: 0;
   border-radius: calc(var(--radius-s) - 2px);
   background: transparent;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .claudian-collaboration-mode:hover,
@@ -429,8 +446,16 @@
 }
 
 .claudian-collaboration-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
   line-height: 1.5;
   user-select: text;
+}
+
+.claudian-collaboration-content pre,
+.claudian-collaboration-content table {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .claudian-collaboration-image {
@@ -818,4 +843,119 @@
 
 .claudian-collaboration-profile-fields .setting-item-name {
   font-size: var(--font-ui-smaller);
+}
+
+@container claudian-collaboration (max-width: 520px) {
+  .claudian-collaboration-roster {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .claudian-collaboration-roster-label {
+    display: none;
+  }
+
+  .claudian-collaboration-modes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .claudian-collaboration-rail {
+    align-items: stretch;
+    padding-inline: 6px;
+  }
+
+  .claudian-collaboration-rail-label {
+    width: 100%;
+    margin: 2px 2px 0;
+  }
+
+  .claudian-collaboration-recipient {
+    min-width: 0;
+    flex: 1 1 132px;
+  }
+
+  .claudian-collaboration-recipient[data-provider]:not([data-provider="all"]) {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .claudian-collaboration-recipient > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .claudian-collaboration-timeline {
+    gap: 10px;
+    padding: 10px 8px 16px;
+  }
+
+  .claudian-collaboration-message--user {
+    width: 100%;
+  }
+
+  .claudian-collaboration-author {
+    flex-wrap: wrap;
+  }
+
+  .claudian-collaboration-author-live {
+    margin-inline-start: 31px;
+  }
+
+  .claudian-collaboration-outcome {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .claudian-collaboration-start-plan {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .claudian-collaboration-quota-recommendation {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .claudian-collaboration-quota-recommendation button,
+  .claudian-collaboration-recovery-actions {
+    width: 100%;
+  }
+
+  .claudian-collaboration-recovery-actions > button,
+  .claudian-collaboration-review {
+    max-width: 100%;
+    flex: 1 1 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .claudian-collaboration-proposal-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .claudian-collaboration-proposal-time {
+    margin-left: 0;
+  }
+}
+
+@container claudian-collaboration (max-width: 340px) {
+  .claudian-collaboration-roster {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .claudian-collaboration-usage-overview {
+    width: 100%;
+  }
+
+  .claudian-collaboration-modes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .claudian-collaboration-recipient {
+    flex-basis: 100%;
+  }
 }

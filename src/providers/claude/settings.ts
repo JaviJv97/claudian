@@ -27,13 +27,13 @@ export const DEFAULT_CLAUDE_COLLABORATION_PROFILES: readonly ClaudeCollaboration
     Object.freeze({
       id: 'personal',
       label: 'Claude Personal',
-      configDir: '~/.claude',
+      configDir: '~/.claude-personal',
       enabled: true,
     }),
     Object.freeze({
       id: 'company',
       label: 'Claude Company',
-      configDir: '~/.claude-company',
+      configDir: '~/.claude',
       enabled: true,
     }),
   ]);

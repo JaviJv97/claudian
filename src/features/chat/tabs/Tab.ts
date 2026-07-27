@@ -1038,6 +1038,19 @@ function initializeInputToolbar(
     getCapabilities: () => getTabCapabilities(tab, plugin),
     getSettings: () => getTabSettingsSnapshot(tab, plugin),
     getEnvironmentVariables: () => plugin.getActiveEnvironmentVariables(),
+    getModelScopeLabel: () => {
+      const conversation = tab.conversationId
+        ? plugin.getConversationSync(tab.conversationId)
+        : null;
+      const participantId = conversation?.collaboration?.participantId;
+      if (participantId) {
+        return participantId
+          .split('-')
+          .map(part => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+          .join(' ');
+      }
+      return ProviderRegistry.getProviderDisplayName(getTabProviderId(tab, plugin));
+    },
     onCustomModelAdd: async (model: string) => {
       const uiConfig = getTabChatUIConfig(tab, plugin);
       if (!uiConfig.addCustomModel) {

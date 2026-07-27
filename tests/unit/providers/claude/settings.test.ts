@@ -10,8 +10,8 @@ describe('Claude collaboration profiles', () => {
 
     expect(settings.collaborationProfiles).toEqual(DEFAULT_CLAUDE_COLLABORATION_PROFILES);
     expect(settings.collaborationProfiles).toEqual([
-      { id: 'personal', label: 'Claude Personal', configDir: '~/.claude', enabled: true },
-      { id: 'company', label: 'Claude Company', configDir: '~/.claude-company', enabled: true },
+      { id: 'personal', label: 'Claude Personal', configDir: '~/.claude-personal', enabled: true },
+      { id: 'company', label: 'Claude Company', configDir: '~/.claude', enabled: true },
     ]);
   });
 

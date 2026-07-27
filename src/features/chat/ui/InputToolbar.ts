@@ -62,6 +62,8 @@ export interface ToolbarCallbacks {
   onPermissionModeChange: (mode: string) => Promise<void>;
   getSettings: () => ToolbarSettings;
   getEnvironmentVariables?: () => string;
+  /** Human-readable owner of the active tab's model selection. */
+  getModelScopeLabel?: () => string;
   getUIConfig: () => ProviderChatUIConfig;
   getCapabilities: () => ProviderCapabilities;
 }
@@ -93,10 +95,19 @@ export class ModelSelector {
   private render() {
     this.container.empty();
 
-    this.buttonEl = this.container.createDiv({ cls: 'claudian-model-btn' });
+    this.buttonEl = this.container.createEl('button', {
+      cls: 'claudian-model-btn',
+      attr: {
+        type: 'button',
+        'aria-haspopup': 'listbox',
+      },
+    });
     this.updateDisplay();
 
-    this.dropdownEl = this.container.createDiv({ cls: 'claudian-model-dropdown' });
+    this.dropdownEl = this.container.createDiv({
+      cls: 'claudian-model-dropdown',
+      attr: { role: 'listbox' },
+    });
     this.renderOptions();
   }
 
@@ -120,6 +131,21 @@ export class ModelSelector {
         width: 12,
       });
     }
+    const scopeLabel = this.callbacks.getModelScopeLabel?.().trim();
+    if (scopeLabel) {
+      this.buttonEl.createSpan({
+        cls: 'claudian-model-scope',
+        text: scopeLabel,
+      });
+      this.buttonEl.setAttribute(
+        'aria-label',
+        `${scopeLabel} model: ${displayModel?.label || 'Unknown'}`,
+      );
+      this.buttonEl.setAttribute(
+        'title',
+        `Model for ${scopeLabel}: ${displayModel?.label || 'Unknown'}`,
+      );
+    }
     const labelEl = this.buttonEl.createSpan({ cls: 'claudian-model-label' });
     labelEl.setText(displayModel?.label || 'Unknown');
   }
@@ -131,6 +157,13 @@ export class ModelSelector {
     const currentModel = this.callbacks.getSettings().model;
     const models = this.getAvailableModels();
     const reversed = [...models].reverse();
+    const scopeLabel = this.callbacks.getModelScopeLabel?.().trim();
+    if (scopeLabel) {
+      this.dropdownEl.createDiv({
+        cls: 'claudian-model-scope-heading',
+        text: `Models for ${scopeLabel}`,
+      });
+    }
 
     let lastGroup: string | undefined;
     for (const model of reversed) {
@@ -141,6 +174,9 @@ export class ModelSelector {
       }
 
       const option = this.dropdownEl.createDiv({ cls: 'claudian-model-option' });
+      option.setAttribute('role', 'option');
+      option.setAttribute('tabindex', '0');
+      option.setAttribute('aria-selected', String(model.value === currentModel));
       if (model.value === currentModel) {
         option.addClass('selected');
       }
@@ -159,13 +195,19 @@ export class ModelSelector {
         option.setAttribute('title', model.description);
       }
 
-      option.addEventListener('click', (e) => {
+      const selectModel = (e: Event) => {
         e.stopPropagation();
         runToolbarAction(async () => {
           await this.callbacks.onModelChange(model.value);
           this.updateDisplay();
           this.renderOptions();
         }, 'Failed to change model');
+      };
+      option.addEventListener('click', selectModel);
+      option.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        selectModel(event);
       });
     }
 

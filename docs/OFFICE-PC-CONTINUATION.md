@@ -12,7 +12,7 @@ Claudian conversation IDs.
 2. Extract `main.js`, `manifest.json`, and `styles.css` into:
 
    ```text
-   <vault>\.obsidian\plugins\claudian\
+   <vault>\.obsidian\plugins\realclaudian\
    ```
 
 3. Open Obsidian, enable Claudian under **Settings → Community plugins**, and

@@ -57,9 +57,10 @@ Or install directly from the [community plugin page](https://community.obsidian.
 ### From GitHub Release
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/YishenTu/claudian/releases/latest)
-2. Create a folder called `claudian` in your vault's plugins folder:
+2. Create a folder called `realclaudian` in your vault's plugins folder. The
+   folder name must match the `id` in `manifest.json`:
    ```
-   /path/to/vault/.obsidian/plugins/claudian/
+   /path/to/vault/.obsidian/plugins/realclaudian/
    ```
 3. Copy the downloaded files into the `claudian` folder
 4. Enable the plugin in Obsidian:
@@ -84,6 +85,47 @@ Or install directly from the [community plugin page](https://community.obsidian.
    - Settings → Community plugins → Enable "Claudian"
 
 ### Development
+
+Account identity and cross-device setup are documented in
+[`docs/ACCOUNT-PROFILES.md`](docs/ACCOUNT-PROFILES.md).
+
+List the Obsidian vaults registered on the current computer:
+
+```bash
+npm run vault:list
+```
+
+Install or update the current build in one vault:
+
+```bash
+# Windows
+npm run vault:install -- "C:\path\to\vault"
+
+# Linux
+npm run vault:install -- "/home/user/path/to/vault"
+```
+
+If an agent created the vault content before the folder was ever opened in
+Obsidian, explicitly initialize its `.obsidian` configuration while installing:
+
+```bash
+npm run vault:install -- --initialize "/path/to/content-only-vault"
+```
+
+Update every vault currently registered with Obsidian:
+
+```bash
+npm run vault:update:registered
+```
+
+The installer uses the manifest ID for the destination folder, preserves
+`data.json` and vault `.claudian` state, backs up replaced build artifacts, and
+enables the plugin without removing other enabled plugins. Add
+`-- --include-unregistered` to `vault:list` to include archived and nested
+vaults found under the current user's home directory. Registered-vault
+discovery supports Windows `%APPDATA%\obsidian\obsidian.json` and Linux
+`$XDG_CONFIG_HOME/obsidian/obsidian.json` (falling back to
+`~/.config/obsidian/obsidian.json`).
 
 ```bash
 # Watch mode

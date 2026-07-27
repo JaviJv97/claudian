@@ -5,7 +5,9 @@ import type { CollaborationDispatch } from '../../core/collaboration/Collaborati
 import { CollaborationCoordinator } from '../../core/collaboration/CollaborationCoordinator';
 import {
   buildDeliberationInstruction,
+  classifyDeliberationInterruption,
   evaluateDeliberationConsensus,
+  findIncompleteDeliberationDeliveries,
 } from '../../core/collaboration/collaborationDeliberation';
 import {
   appendQuotaHistory,
@@ -62,6 +64,7 @@ import type {
   CollaborationEvent,
   CollaborationRoom,
   CollaborationWorkflowPhase,
+  Conversation,
   ImageAttachment,
 } from '../../core/types';
 import { VIEW_TYPE_CLAUDIAN } from '../../core/types';
@@ -88,7 +91,7 @@ import {
   findCollaborationRecipientReadiness,
 } from './collaboration/collaborationRebinding';
 import { CollaborationResourcePolicyModal } from './collaboration/CollaborationResourcePolicyModal';
-import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
+import { waitForFreshAssistantMessage } from './collaboration/collaborationResponse';
 import {
   chooseCollaborationParticipants,
   toClaudeParticipantChoices,
@@ -694,6 +697,7 @@ export class ClaudianView extends ItemView {
         createdTabIds.push(tab.id);
       }
 
+      await this.verifyCollaborationParticipantRuntimes(conversations);
       this.updateTabBarVisibility();
       await this.reconcileCollaborationTimelines();
       new Notice(`${selection.title} room created.`);
@@ -923,21 +927,49 @@ export class ClaudianView extends ItemView {
       new Notice('No archived collaboration rooms found.');
       return false;
     }
+    const openConversationIds = new Set(
+      this.tabManager.getAllTabs().flatMap(tab => (
+        tab.conversationId ? [tab.conversationId] : []
+      )),
+    );
+    const participantsToOpen = room.participants.filter(participant => (
+      !openConversationIds.has(participant.conversationId)
+    ));
+    const reusableBlankTabs = this.tabManager.getAllTabs().filter(tab => (
+      tab.lifecycleState === 'blank'
+      && !tab.state.isStreaming
+      && !tab.state.isRewinding
+    ));
+    const reusableCount = Math.min(reusableBlankTabs.length, participantsToOpen.length);
+    const additionalTabsNeeded = participantsToOpen.length - reusableCount;
     const maxTabs = Math.max(3, Math.min(10, this.plugin.settings.maxTabs ?? 3));
-    if (this.tabManager.getTabCount() + room.participants.length > maxTabs) {
+    if (this.tabManager.getTabCount() + additionalTabsNeeded > maxTabs) {
       new Notice(
-        `Reopening ${room.title} needs ${room.participants.length} available tabs.`,
+        `Reopening ${room.title} needs ${additionalTabsNeeded} additional agent tab${
+          additionalTabsNeeded === 1 ? '' : 's'
+        }.`,
       );
       return false;
     }
-    const openedTabs: TabId[] = [];
+    const createdTabIds: TabId[] = [];
+    const reusedTabIds: TabId[] = [];
     try {
-      for (const [index, participant] of room.participants.entries()) {
+      for (const [index, participant] of participantsToOpen.entries()) {
+        const reusableTab = reusableBlankTabs[index];
+        if (reusableTab) {
+          await this.tabManager.switchToTab(reusableTab.id);
+          await this.tabManager.openConversation(participant.conversationId, {
+            activate: index === participantsToOpen.length - 1,
+            preferNewTab: false,
+          });
+          reusedTabIds.push(reusableTab.id);
+          continue;
+        }
         const tab = await this.tabManager.createTab(participant.conversationId, undefined, {
-          activate: index === room.participants.length - 1,
+          activate: index === participantsToOpen.length - 1,
         });
         if (!tab) throw new Error('Could not reopen every collaboration participant.');
-        openedTabs.push(tab.id);
+        createdTabIds.push(tab.id);
       }
       await this.plugin.storage.rooms.reopen(room.id);
       this.updateTabBarVisibility();
@@ -945,12 +977,17 @@ export class ClaudianView extends ItemView {
       new Notice(`${room.title} reopened.`);
       return true;
     } catch (error) {
-      for (const tabId of openedTabs) {
+      for (const tabId of createdTabIds) {
         try {
           await this.tabManager.closeTab(tabId, true);
         } catch {
           // Continue rolling back the remaining tabs.
         }
+      }
+      for (const tabId of reusedTabIds) {
+        await this.tabManager.getTab(tabId)?.controllers.conversationController
+          ?.createNew({ force: true })
+          .catch(() => undefined);
       }
       new Notice(error instanceof Error ? error.message : 'Could not reopen collaboration.');
       return false;
@@ -1133,12 +1170,14 @@ export class ClaudianView extends ItemView {
         )
       ))
     ) {
-      this.queueCollaborationMessage(room.id, {
+      const queued = this.queueCollaborationMessage(room.id, {
         originTabId,
         content,
         images: images ? images.map(image => ({ ...image })) : undefined,
       });
-      new Notice('Message queued for the next collaboration round.');
+      new Notice(queued
+        ? 'Message queued for the next collaboration round.'
+        : 'This message is already queued for the next collaboration round.');
       return true;
     }
     const discussionMode = room.discussionMode ?? 'parallel';
@@ -1278,10 +1317,11 @@ export class ClaudianView extends ItemView {
           participant.conversationId = tab.conversationId;
         }
 
-        const assistantMessage = findFreshAssistantMessage(
-          tab.state.messages,
-          existingAssistantIds,
-        );
+        const assistantMessage = await waitForFreshAssistantMessage({
+          getMessages: () => tab.state.messages,
+          existingMessageIds: existingAssistantIds,
+          signal,
+        });
         if (assistantMessage) {
           const assistantEvent: CollaborationEvent = {
             id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -1735,7 +1775,7 @@ export class ClaudianView extends ItemView {
         phase: CollaborationDeliberationPhase,
         recipientIds: string[],
         strategy: 'parallel' | 'sequential',
-      ): Promise<void> => {
+      ): Promise<{ complete: boolean; missing: string[] }> => {
         activeDeliberationId = deliberationId;
         activeDeliberationPhase = phase;
         const phaseTurn = await this.collaborationCoordinator.send(room, {
@@ -1772,24 +1812,67 @@ export class ClaudianView extends ItemView {
           );
         }
         this.refreshCollaborationTimelines(room.id);
+        const missing = findIncompleteDeliberationDeliveries(
+          phaseTurn.event,
+          recipientIds,
+        );
+        return { complete: missing.length === 0, missing };
       };
 
-      await runPhase(
+      const positionResult = await runPhase(
         'position',
         allParticipantIds,
         sharedReferencedFiles.length > 0 ? 'sequential' : 'parallel',
       );
-      await runPhase(
+      if (!positionResult.complete) {
+        await this.appendIncompleteDeliberationOutcome(
+          room,
+          deliberationId,
+          'position',
+          positionResult.missing,
+        );
+        return true;
+      }
+      const critiqueResult = await runPhase(
         'critique',
         allParticipantIds,
         sharedReferencedFiles.length > 0 ? 'sequential' : 'parallel',
       );
-      if (synthesizerId) await runPhase('synthesis', [synthesizerId], 'sequential');
-      await runPhase(
+      if (!critiqueResult.complete) {
+        await this.appendIncompleteDeliberationOutcome(
+          room,
+          deliberationId,
+          'critique',
+          critiqueResult.missing,
+        );
+        return true;
+      }
+      if (synthesizerId) {
+        const synthesisResult = await runPhase('synthesis', [synthesizerId], 'sequential');
+        if (!synthesisResult.complete) {
+          await this.appendIncompleteDeliberationOutcome(
+            room,
+            deliberationId,
+            'synthesis',
+            synthesisResult.missing,
+          );
+          return true;
+        }
+      }
+      const ratificationResult = await runPhase(
         'ratification',
         allParticipantIds,
         sharedReferencedFiles.length > 0 ? 'sequential' : 'parallel',
       );
+      if (!ratificationResult.complete) {
+        await this.appendIncompleteDeliberationOutcome(
+          room,
+          deliberationId,
+          'ratification',
+          ratificationResult.missing,
+        );
+        return true;
+      }
       const consensus = evaluateDeliberationConsensus(
         room.events,
         deliberationId,
@@ -1814,11 +1897,11 @@ export class ClaudianView extends ItemView {
           ? consensus.concerns.length > 0
             ? `Approved with non-blocking concerns from: ${consensus.concerns.join(', ')}.`
             : 'Unanimous approval: every participant explicitly approved the synthesis.'
-          : `No consensus. Objections preserved from: ${
-            consensus.objections.length > 0
-              ? consensus.objections.join(', ')
-              : consensus.missing.join(', ') || 'missing ratifications'
-          }.`,
+          : consensus.objections.length > 0
+            ? `Rejected after blocking objections from: ${consensus.objections.join(', ')}.`
+            : `Deliberation incomplete. Missing ratifications from: ${
+              consensus.missing.join(', ') || 'unknown participants'
+            }.`,
         createdAt: Date.now(),
         delivery: {},
         deliberationId,
@@ -1978,6 +2061,29 @@ export class ClaudianView extends ItemView {
       const latestParticipant = latestRoom?.participants.find(candidate => (
         getCollaborationParticipantId(candidate) === participantId
       ));
+      const latestTab = this.tabManager?.getAllTabs().find(candidate => (
+        candidate.conversationId === participant.conversationId
+      ));
+      if (
+        latestParticipant?.conversationId !== participant.conversationId
+        || latestParticipant?.runtimeProfileId !== participant.runtimeProfileId
+        || latestTab !== participantTab
+        || latestTab.service !== runtime
+        || runtime.runtimeProfileId !== participant.runtimeProfileId
+        || (
+          participant.runtimeProfileId !== undefined
+          && quotaSnapshot.runtimeProfileId !== participant.runtimeProfileId
+        )
+        || (
+          runtime.accountBindingFingerprint !== undefined
+          && quotaSnapshot.accountBindingFingerprint !== runtime.accountBindingFingerprint
+        )
+      ) {
+        throw new Error(
+          `${participant.label ?? participantId} account binding changed during quota refresh. `
+          + 'The stale usage result was discarded.',
+        );
+      }
       const currentPolicy = latestParticipant?.resourcePolicy ?? participant.resourcePolicy;
       const weeklyWindow = quotaSnapshot.windows.find(window => (
         window.id === 'seven-day' || window.id === 'secondary'
@@ -1987,8 +2093,10 @@ export class ClaudianView extends ItemView {
         participantId,
         {
           mode: currentPolicy?.mode ?? 'active',
-          weeklyUsagePercent: weeklyWindow?.utilizationPercent
-            ?? currentPolicy?.weeklyUsagePercent,
+          // A successful provider refresh is authoritative. If this account
+          // exposes no weekly window, clear any manual or previously imported
+          // value instead of presenting it as live usage for this profile.
+          weeklyUsagePercent: weeklyWindow?.utilizationPercent,
           quotaSnapshot,
           quotaHistory: appendQuotaHistory(currentPolicy?.quotaHistory, {
             fetchedAt: quotaSnapshot.fetchedAt,
@@ -2519,7 +2627,11 @@ export class ClaudianView extends ItemView {
     const outcome = [...room.events].reverse().find(event => (
       event.deliberationId === deliberationId && event.deliberationOutcome
     ));
-    if (!outcome?.deliberationOutcome || outcome.deliberationOutcome.status === 'rejected') {
+    if (
+      !outcome?.deliberationOutcome
+      || outcome.deliberationOutcome.status === 'rejected'
+      || outcome.deliberationOutcome.status === 'incomplete'
+    ) {
       throw new Error('The plan is not approved');
     }
     const synthesis = room.events.find(event => (
@@ -2807,6 +2919,7 @@ export class ClaudianView extends ItemView {
     if (
       !outcomeEvent?.deliberationOutcome
       || outcomeEvent.deliberationOutcome.status === 'rejected'
+      || outcomeEvent.deliberationOutcome.status === 'incomplete'
     ) {
       throw new Error('The plan is not approved');
     }
@@ -2925,6 +3038,46 @@ export class ClaudianView extends ItemView {
     return room;
   }
 
+  private async appendIncompleteDeliberationOutcome(
+    room: CollaborationRoom,
+    deliberationId: string,
+    phase: CollaborationDeliberationPhase,
+    missing: string[],
+  ): Promise<void> {
+    const finalEvent: CollaborationEvent = {
+      id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      kind: 'system',
+      authorId: 'system',
+      recipientIds: ['user'],
+      content: `Deliberation paused after the ${phase} phase. Missing required responses from: ${
+        missing.join(', ') || 'unknown participants'
+      }. Reopen any missing participant, then start a new deliberation turn.`,
+      createdAt: Date.now(),
+      delivery: {},
+      deliberationId,
+      deliberationPhase: phase,
+      deliberationOutcome: {
+        status: 'incomplete',
+        approvals: [],
+        objections: [],
+        concerns: [],
+        missing,
+        interruptedPhase: phase,
+        interruptionReason: classifyDeliberationInterruption(
+          [...room.events].reverse().find(event => (
+            event.deliberationId === deliberationId
+            && event.deliberationPhase === phase
+            && event.kind === (phase === 'position' ? 'message' : 'system')
+          )),
+          missing,
+        ),
+      },
+    };
+    await this.plugin.storage.rooms.appendEvent(room.id, finalEvent);
+    room.events.push(finalEvent);
+    this.refreshCollaborationTimelines(room.id);
+  }
+
   private stopCollaborationDelivery(roomId: string, participantId: string): void {
     const key = this.getCollaborationDeliveryKey(roomId, participantId);
     const eventId = this.activeCollaborationDeliveries.get(key);
@@ -2952,15 +3105,22 @@ export class ClaudianView extends ItemView {
         hydrationState: tab.hydrationState,
       })),
     );
-    const initial = getReadiness();
-    if (initial.missingParticipantIds.length > 0) {
-      new Notice(
-        `Reconnect ${initial.missingParticipantIds.join(', ')} before sending this message.`,
+    let readiness = getReadiness();
+    if (readiness.missingParticipantIds.length > 0) {
+      const restored = await this.restoreMissingCollaborationParticipants(
+        room,
+        readiness.missingParticipantIds,
       );
-      return false;
+      if (!restored) {
+        new Notice(
+          `Could not reopen ${readiness.missingParticipantIds.join(', ')}. Free an agent tab and retry.`,
+        );
+        return false;
+      }
+      readiness = getReadiness();
     }
     try {
-      for (const tabId of initial.tabIdsToHydrate) {
+      for (const tabId of readiness.tabIdsToHydrate) {
         await this.tabManager.switchToTab(tabId);
       }
     } catch {
@@ -2982,10 +3142,105 @@ export class ClaudianView extends ItemView {
   private queueCollaborationMessage(
     roomId: string,
     message: QueuedCollaborationMessage,
-  ): void {
+  ): boolean {
     const queue = this.queuedCollaborationMessages.get(roomId) ?? [];
+    const messageKey = this.getQueuedCollaborationMessageKey(message);
+    if (queue.some(candidate => (
+      this.getQueuedCollaborationMessageKey(candidate) === messageKey
+    ))) {
+      return false;
+    }
     queue.push(message);
     this.queuedCollaborationMessages.set(roomId, queue);
+    return true;
+  }
+
+  private async restoreMissingCollaborationParticipants(
+    room: CollaborationRoom,
+    participantIds: readonly string[],
+  ): Promise<boolean> {
+    if (!this.tabManager) return false;
+    const createdTabIds: TabId[] = [];
+    const reusedTabIds: TabId[] = [];
+    const reusableBlankTabs = this.tabManager.getAllTabs().filter(tab => (
+      tab.lifecycleState === 'blank'
+      && !tab.state.isStreaming
+      && !tab.state.isRewinding
+    ));
+    try {
+      for (const [index, participantId] of participantIds.entries()) {
+        const participant = room.participants.find(candidate => (
+          getCollaborationParticipantId(candidate) === participantId
+        ));
+        if (!participant || !this.plugin.getConversationSync(participant.conversationId)) {
+          throw new Error(`${participantId} conversation is unavailable`);
+        }
+        const reusableTab = reusableBlankTabs[index];
+        if (reusableTab) {
+          await this.tabManager.switchToTab(reusableTab.id);
+          await this.tabManager.openConversation(participant.conversationId, {
+            activate: false,
+            preferNewTab: false,
+          });
+          reusedTabIds.push(reusableTab.id);
+          continue;
+        }
+        const tab = await this.tabManager.createTab(
+          participant.conversationId,
+          undefined,
+          { activate: false },
+        );
+        if (!tab) throw new Error(`No tab is available for ${participantId}`);
+        createdTabIds.push(tab.id);
+      }
+      this.updateTabBarVisibility();
+      await this.reconcileCollaborationTimelines();
+      return true;
+    } catch {
+      for (const tabId of createdTabIds) {
+        await this.tabManager.closeTab(tabId, true).catch(() => undefined);
+      }
+      for (const tabId of reusedTabIds) {
+        await this.tabManager.getTab(tabId)?.controllers.conversationController
+          ?.createNew({ force: true })
+          .catch(() => undefined);
+      }
+      return false;
+    }
+  }
+
+  private async verifyCollaborationParticipantRuntimes(
+    conversations: Array<{
+      participant: { label: string; runtimeProfileId?: string };
+      conversation: Conversation;
+    }>,
+  ): Promise<void> {
+    if (!this.tabManager) throw new Error('Collaboration tabs are unavailable.');
+    for (const { participant, conversation } of conversations) {
+      const tab = this.tabManager.getAllTabs().find(candidate => (
+        candidate.conversationId === conversation.id
+      ));
+      if (!tab) throw new Error(`Could not verify ${participant.label}.`);
+      await initializeTabService(tab, this.plugin, conversation);
+      setupServiceCallbacks(tab, this.plugin);
+      const runtime = tab.service;
+      if (!runtime || runtime.runtimeProfileId !== participant.runtimeProfileId) {
+        throw new Error(`${participant.label} opened with the wrong account profile.`);
+      }
+      await runtime.ensureReady();
+    }
+  }
+
+  private getQueuedCollaborationMessageKey(message: QueuedCollaborationMessage): string {
+    return JSON.stringify({
+      originTabId: message.originTabId,
+      content: message.content.trim(),
+      images: message.images?.map(image => ({
+        name: image.name,
+        mediaType: image.mediaType,
+        size: image.size,
+      })) ?? [],
+    });
   }
 
   private async drainNextCollaborationMessage(roomId: string): Promise<void> {
@@ -2999,20 +3254,50 @@ export class ClaudianView extends ItemView {
       return;
     }
     if (!queue || queue.length === 0) this.queuedCollaborationMessages.delete(roomId);
+    const originTabId = this.resolveQueuedCollaborationOriginTab(roomId, next.originTabId);
+    if (!originTabId) {
+      this.requeueCollaborationMessage(roomId, next);
+      new Notice('Queued collaboration message is waiting for the room to be reopened.');
+      return;
+    }
     try {
-      await this.routeCollaborationMessage(
-        next.originTabId,
+      const handled = await this.routeCollaborationMessage(
+        originTabId,
         next.content,
         next.images,
       );
+      if (!handled) {
+        this.requeueCollaborationMessage(roomId, next);
+        new Notice('Queued collaboration message could not be delivered and remains queued.');
+      }
     } catch (error) {
+      this.requeueCollaborationMessage(roomId, next);
       new Notice(
         error instanceof Error
-          ? `Queued collaboration message failed: ${error.message}`
-          : 'Queued collaboration message failed.',
+          ? `Queued collaboration message remains queued: ${error.message}`
+          : 'Queued collaboration message remains queued after a delivery failure.',
       );
-      void this.drainNextCollaborationMessage(roomId);
     }
+  }
+
+  private resolveQueuedCollaborationOriginTab(
+    roomId: string,
+    preferredTabId: TabId,
+  ): TabId | null {
+    if (!this.tabManager || this.tabManager.getTab(preferredTabId)) return preferredTabId;
+    return this.tabManager?.getAllTabs().find((tab) => {
+      if (!tab.conversationId) return false;
+      return this.plugin.getConversationSync(tab.conversationId)?.collaboration?.roomId === roomId;
+    })?.id ?? null;
+  }
+
+  private requeueCollaborationMessage(
+    roomId: string,
+    message: QueuedCollaborationMessage,
+  ): void {
+    const queue = this.queuedCollaborationMessages.get(roomId) ?? [];
+    queue.unshift(message);
+    this.queuedCollaborationMessages.set(roomId, queue);
   }
 
   private refreshCollaborationTimelines(roomId: string): void {

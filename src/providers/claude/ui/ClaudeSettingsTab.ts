@@ -143,7 +143,7 @@ export const claudeSettingsTabRenderer: ProviderSettingsTabRenderer = {
     new Setting(container).setName('Collaboration profiles').setHeading();
     container.createEl('p', {
       cls: 'setting-item-description',
-      text: 'Add one profile per Claude account. Claudian checks only whether the config directory exists; credentials remain in Claude’s own files.',
+      text: 'Stable personal and company roles ship with Claudian. Connect each role to this device’s Claude config directory; credentials remain in Claude’s own files. Usage stays unavailable when a role cannot be verified.',
     });
     const profilesContainer = container.createDiv({
       cls: 'claudian-collaboration-profile-settings',
@@ -175,7 +175,7 @@ export const claudeSettingsTabRenderer: ProviderSettingsTabRenderer = {
         const row = new Setting(profilesContainer)
           .setName(profile.label || 'Unnamed profile')
           .setDesc(directoryExists
-            ? `Ready · ${profile.configDir}`
+            ? `Configured · authentication is verified when the runtime starts · ${profile.configDir}`
             : `Directory not found · ${profile.configDir}`);
         row.addToggle(toggle => toggle
           .setValue(profile.enabled)

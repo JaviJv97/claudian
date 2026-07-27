@@ -72,7 +72,11 @@ import {
   isSessionMissingError,
 } from '../../../utils/session';
 import { CLAUDE_PROVIDER_CAPABILITIES } from '../capabilities';
-import { resolveClaudeRuntimeProfileEnvironment } from '../config/ClaudeRuntimeProfile';
+import {
+  type ClaudeRuntimeProfileBinding,
+  resolveClaudeRuntimeProfileBinding,
+  resolveClaudeRuntimeProfileEnvironment,
+} from '../config/ClaudeRuntimeProfile';
 import { loadSubagentFinalResult, loadSubagentToolCalls } from '../history/ClaudeHistoryStore';
 import { loadClaudeAgentQuery } from '../loadClaudeAgentSdk';
 import { toClaudeRuntimeModelId } from '../modelSelection';
@@ -160,6 +164,8 @@ export class ClaudianService implements ChatRuntime {
   private currentConversationId: string | null = null;
   private readyStateListeners = new Set<(ready: boolean) => void>();
   readonly runtimeProfileId?: string;
+  readonly accountBindingFingerprint?: string;
+  private readonly runtimeProfileBinding: ClaudeRuntimeProfileBinding | null;
 
   // Modular components
   private sessionManager = new SessionManager();
@@ -245,12 +251,18 @@ export class ClaudianService implements ChatRuntime {
       this.pluginManager = services.pluginManager ?? legacyPlugin.pluginManager ?? null;
       this.agentManager = services.agentManager ?? legacyPlugin.agentManager ?? null;
       this.runtimeProfileId = services.runtimeProfileId;
+      this.runtimeProfileBinding = resolveClaudeRuntimeProfileBinding(
+        services.runtimeProfileId,
+        this.plugin.settings,
+      );
+      this.accountBindingFingerprint = this.runtimeProfileBinding?.fingerprint;
       return;
     }
 
     this.mcpManager = services;
     this.pluginManager = legacyPlugin.pluginManager ?? null;
     this.agentManager = legacyPlugin.agentManager ?? null;
+    this.runtimeProfileBinding = null;
   }
 
   getCapabilities() {
@@ -263,7 +275,17 @@ export class ClaudianService implements ChatRuntime {
     }
     const usage = await this.persistentQuery
       .usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
-    return mapClaudeUsageToQuotaSnapshot(usage);
+    const snapshot = mapClaudeUsageToQuotaSnapshot(usage);
+    const binding = this.runtimeProfileBinding;
+    return {
+      ...snapshot,
+      ...(binding
+        ? {
+          runtimeProfileId: binding.runtimeProfileId,
+          accountBindingFingerprint: binding.fingerprint,
+        }
+        : {}),
+    };
   }
 
   async prepareForTurn(): Promise<void> {
@@ -819,7 +841,9 @@ export class ClaudianService implements ChatRuntime {
   private buildQueryOptionsContext(vaultPath: string, cliPath: string): QueryOptionsContext {
     const customEnv = {
       ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
-      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings),
+      ...(this.runtimeProfileBinding
+        ? { CLAUDE_CONFIG_DIR: this.runtimeProfileBinding.configDir }
+        : resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings)),
     };
     const enhancedPath = getEnhancedPath(customEnv.PATH, cliPath);
 
@@ -837,7 +861,9 @@ export class ClaudianService implements ChatRuntime {
   private buildHistoryPathContext(vaultPath: string): ProviderHistoryPathContext {
     const customEnv = {
       ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
-      ...resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings),
+      ...(this.runtimeProfileBinding
+        ? { CLAUDE_CONFIG_DIR: this.runtimeProfileBinding.configDir }
+        : resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings)),
     };
     return {
       environment: { ...process.env, ...customEnv },

@@ -1,6 +1,8 @@
 import {
   buildDeliberationInstruction,
+  classifyDeliberationInterruption,
   evaluateDeliberationConsensus,
+  findIncompleteDeliberationDeliveries,
 } from '@/core/collaboration/collaborationDeliberation';
 import type { CollaborationEvent, CollaborationRoom } from '@/core/types';
 
@@ -18,7 +20,74 @@ const room: CollaborationRoom = {
   events: [],
 };
 
+describe('classifyDeliberationInterruption', () => {
+  const phaseEvent: CollaborationEvent = {
+    id: 'phase',
+    kind: 'system',
+    authorId: 'system',
+    recipientIds: ['personal', 'codex'],
+    content: 'Critique phase',
+    createdAt: 1,
+    delivery: {
+      personal: { status: 'failed' },
+      codex: { status: 'cancelled' },
+    },
+  };
+
+  it('preserves cancellation as the primary recovery reason', () => {
+    expect(classifyDeliberationInterruption(phaseEvent, ['personal', 'codex']))
+      .toBe('cancelled');
+  });
+
+  it('distinguishes provider failure from an absent response', () => {
+    expect(classifyDeliberationInterruption(phaseEvent, ['personal'])).toBe('failed');
+    expect(classifyDeliberationInterruption(undefined, ['personal']))
+      .toBe('missing-response');
+  });
+});
+
 describe('collaboration deliberation', () => {
+  it('identifies failed required deliveries before the next phase starts', () => {
+    const event: CollaborationEvent = {
+      id: 'phase-1',
+      kind: 'system',
+      authorId: 'system',
+      recipientIds: ['company', 'codex'],
+      content: 'Critique phase',
+      createdAt: 1,
+      delivery: {
+        company: { status: 'completed' },
+        codex: { status: 'failed', error: 'response not hydrated' },
+      },
+    };
+
+    expect(findIncompleteDeliberationDeliveries(
+      event,
+      ['company', 'codex'],
+    )).toEqual(['codex']);
+  });
+
+  it('accepts completed, resolved, and conflict deliveries as phase-terminal', () => {
+    const event: CollaborationEvent = {
+      id: 'phase-1',
+      kind: 'system',
+      authorId: 'system',
+      recipientIds: ['personal', 'company', 'codex'],
+      content: 'Ratification phase',
+      createdAt: 1,
+      delivery: {
+        personal: { status: 'completed' },
+        company: { status: 'resolved' },
+        codex: { status: 'conflict' },
+      },
+    };
+
+    expect(findIncompleteDeliberationDeliveries(
+      event,
+      ['personal', 'company', 'codex'],
+    )).toEqual([]);
+  });
+
   it('keeps the position phase independent', () => {
     const instruction = buildDeliberationInstruction(
       room,
@@ -138,6 +207,43 @@ describe('collaboration deliberation', () => {
     }] as CollaborationEvent[];
 
     expect(evaluateDeliberationConsensus(events, 'd-3', ['personal']))
+      .toMatchObject({
+        approved: false,
+        approvals: [],
+        objections: ['personal'],
+      });
+  });
+
+  it('uses each participant latest ratification after a retry', () => {
+    const events = [
+      {
+        id: 'old',
+        content: 'VERDICT: OBJECT\nBLOCKING_OBJECTIONS: Missing evidence',
+        createdAt: 1,
+      },
+      {
+        id: 'new',
+        content: 'VERDICT: APPROVE\nBLOCKING_OBJECTIONS: NONE\nCONCERNS: NONE',
+        createdAt: 2,
+      },
+    ].map(event => ({
+      ...event,
+      kind: 'message',
+      authorId: 'personal',
+      recipientIds: ['user'],
+      delivery: {},
+      deliberationId: 'd-retry',
+      deliberationPhase: 'ratification',
+    })) as CollaborationEvent[];
+
+    expect(evaluateDeliberationConsensus(events, 'd-retry', ['personal']))
+      .toMatchObject({
+        approved: true,
+        approvals: ['personal'],
+        objections: [],
+      });
+
+    expect(evaluateDeliberationConsensus([...events].reverse(), 'd-retry', ['personal']))
       .toMatchObject({
         approved: false,
         approvals: [],

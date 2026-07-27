@@ -87,6 +87,10 @@ export interface ProviderQuotaWindow {
 export interface ProviderQuotaSnapshot {
   source: 'provider';
   fetchedAt: number;
+  /** Stable logical account role that produced this snapshot, when applicable. */
+  runtimeProfileId?: string;
+  /** Non-secret fingerprint of the device-local account binding. */
+  accountBindingFingerprint?: string;
   plan?: string;
   windows: ProviderQuotaWindow[];
   unavailableReason?: string;

@@ -103,11 +103,18 @@ export function evaluateDeliberationConsensus(
   concerns: string[];
   missing: string[];
 } {
-  const ratifications = events.filter(event => (
-    event.deliberationId === deliberationId
-    && event.deliberationPhase === 'ratification'
-    && requiredParticipantIds.includes(String(event.authorId))
-  ));
+  const latestRatifications = new Map<string, CollaborationEvent>();
+  for (const event of events) {
+    const participantId = String(event.authorId);
+    if (
+      event.deliberationId === deliberationId
+      && event.deliberationPhase === 'ratification'
+      && requiredParticipantIds.includes(participantId)
+    ) {
+      latestRatifications.set(participantId, event);
+    }
+  }
+  const ratifications = [...latestRatifications.values()];
   const getVerdict = (content: string): 'approve' | 'object' | null => {
     const normalized = content
       .trim()
@@ -156,4 +163,24 @@ export function evaluateDeliberationConsensus(
     concerns,
     missing,
   };
+}
+
+export function findIncompleteDeliberationDeliveries(
+  event: CollaborationEvent,
+  requiredParticipantIds: readonly string[],
+): string[] {
+  return requiredParticipantIds.filter((participantId) => {
+    const status = event.delivery[participantId]?.status;
+    return status !== 'completed' && status !== 'conflict' && status !== 'resolved';
+  });
+}
+
+export function classifyDeliberationInterruption(
+  event: CollaborationEvent | undefined,
+  participantIds: readonly string[],
+): 'failed' | 'cancelled' | 'missing-response' {
+  const statuses = participantIds.map(participantId => event?.delivery[participantId]?.status);
+  if (statuses.includes('cancelled')) return 'cancelled';
+  if (statuses.includes('failed')) return 'failed';
+  return 'missing-response';
 }

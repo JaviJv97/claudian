@@ -187,6 +187,133 @@ describe('ClaudianView collaboration quota refresh', () => {
     )).resolves.toBeUndefined();
     expect(runtime.getQuotaSnapshot).toHaveBeenCalledTimes(1);
   });
+
+  it('updates only the matching participant profile with its live weekly quota', async () => {
+    const companyRuntime = {
+      ensureReady: jest.fn().mockResolvedValue(undefined),
+      getQuotaSnapshot: jest.fn().mockResolvedValue({
+        fetchedAt: 100,
+        source: 'claude-local',
+        runtimeProfileId: 'company',
+        windows: [{
+          id: 'seven-day',
+          label: '7 day',
+          utilizationPercent: 21,
+        }],
+      }),
+      runtimeProfileId: 'company',
+    };
+    const room: any = {
+      id: 'room-1',
+      participants: [
+        {
+          id: 'personal',
+          providerId: 'claude',
+          runtimeProfileId: 'personal',
+          conversationId: 'personal-conversation',
+          resourcePolicy: { mode: 'active', weeklyUsagePercent: 97 },
+        },
+        {
+          id: 'company',
+          providerId: 'claude',
+          runtimeProfileId: 'company',
+          conversationId: 'company-conversation',
+          resourcePolicy: { mode: 'active', weeklyUsagePercent: 96 },
+        },
+      ],
+    };
+    const updateParticipantResourcePolicy = jest.fn().mockResolvedValue(undefined);
+    const view = Object.create(ClaudianView.prototype) as any;
+    Object.assign(view, {
+      plugin: {
+        storage: {
+          rooms: {
+            get: jest.fn().mockResolvedValue(room),
+            updateParticipantResourcePolicy,
+          },
+        },
+      },
+      quotaRefreshBackoff: new Map(),
+      quotaRefreshFlights: new Map(),
+      tabManager: {
+        getAllTabs: jest.fn().mockReturnValue([
+          {
+            conversationId: 'personal-conversation',
+            service: { runtimeProfileId: 'personal' },
+            serviceInitialized: true,
+          },
+          {
+            conversationId: 'company-conversation',
+            service: companyRuntime,
+            serviceInitialized: true,
+          },
+        ]),
+      },
+    });
+
+    await view.refreshCollaborationParticipantQuota('room-1', 'company', false);
+
+    expect(companyRuntime.getQuotaSnapshot).toHaveBeenCalledTimes(1);
+    expect(updateParticipantResourcePolicy).toHaveBeenCalledWith(
+      'room-1',
+      'company',
+      expect.objectContaining({ weeklyUsagePercent: 21 }),
+    );
+    expect(updateParticipantResourcePolicy).not.toHaveBeenCalledWith(
+      'room-1',
+      'personal',
+      expect.anything(),
+    );
+  });
+
+  it('discards a quota result whose account profile does not match the participant', async () => {
+    const runtime = {
+      ensureReady: jest.fn().mockResolvedValue(undefined),
+      getQuotaSnapshot: jest.fn().mockResolvedValue({
+        fetchedAt: 100,
+        source: 'provider',
+        runtimeProfileId: 'personal',
+        windows: [{ id: 'seven-day', label: '7 day', utilizationPercent: 97 }],
+      }),
+      runtimeProfileId: 'company',
+    };
+    const participant = {
+      id: 'company',
+      label: 'Claude Company',
+      providerId: 'claude',
+      runtimeProfileId: 'company',
+      conversationId: 'company-conversation',
+    };
+    const room: any = { id: 'room-1', participants: [participant] };
+    const tab = {
+      conversationId: participant.conversationId,
+      service: runtime,
+      serviceInitialized: true,
+    };
+    const updateParticipantResourcePolicy = jest.fn();
+    const view = Object.create(ClaudianView.prototype) as any;
+    Object.assign(view, {
+      plugin: {
+        storage: {
+          rooms: {
+            get: jest.fn().mockResolvedValue(room),
+            updateParticipantResourcePolicy,
+          },
+        },
+      },
+      quotaRefreshBackoff: new Map(),
+      quotaRefreshFlights: new Map(),
+      tabManager: { getAllTabs: jest.fn().mockReturnValue([tab]) },
+    });
+
+    await expect(view.refreshCollaborationParticipantQuota('room-1', 'company', false))
+      .rejects.toThrow('stale usage result was discarded');
+    expect(updateParticipantResourcePolicy).not.toHaveBeenCalledWith(
+      'room-1',
+      'company',
+      expect.objectContaining({ quotaSnapshot: expect.anything() }),
+    );
+  });
 });
 
 describe('ClaudianView collaboration turn queue', () => {
@@ -243,6 +370,61 @@ describe('ClaudianView collaboration turn queue', () => {
     expect(view.routeCollaborationMessage).toHaveBeenCalledTimes(1);
     expect(view.routeCollaborationMessage).toHaveBeenCalledWith('tab-1', 'First', undefined);
     expect(view.queuedCollaborationMessages.get('room-1')).toHaveLength(1);
+  });
+
+  it('does not enqueue the same follow-up more than once', () => {
+    const view = Object.create(ClaudianView.prototype) as any;
+    view.queuedCollaborationMessages = new Map();
+    const message = {
+      originTabId: 'tab-1',
+      content: 'Additional context',
+    };
+
+    expect(view.queueCollaborationMessage('room-1', message)).toBe(true);
+    expect(view.queueCollaborationMessage('room-1', { ...message })).toBe(false);
+    expect(view.queuedCollaborationMessages.get('room-1')).toEqual([message]);
+  });
+
+  it('keeps a follow-up queued when routing cannot handle it', async () => {
+    const view = Object.create(ClaudianView.prototype) as any;
+    view.activeCollaborationDeliveries = new Map();
+    view.queuedCollaborationMessages = new Map();
+    view.routeCollaborationMessage = jest.fn().mockResolvedValue(false);
+    const message = { originTabId: 'tab-1', content: 'Do not lose this' };
+    view.queueCollaborationMessage('room-1', message);
+
+    await view.drainNextCollaborationMessage('room-1');
+
+    expect(view.queuedCollaborationMessages.get('room-1')).toEqual([message]);
+  });
+
+  it('uses another open room tab when the original queued tab was closed', async () => {
+    const view = Object.create(ClaudianView.prototype) as any;
+    view.activeCollaborationDeliveries = new Map();
+    view.queuedCollaborationMessages = new Map();
+    view.routeCollaborationMessage = jest.fn().mockResolvedValue(true);
+    view.plugin = {
+      getConversationSync: jest.fn().mockReturnValue({
+        collaboration: { roomId: 'room-1' },
+      }),
+    };
+    view.tabManager = {
+      getTab: jest.fn().mockReturnValue(undefined),
+      getAllTabs: jest.fn().mockReturnValue([{
+        id: 'tab-2',
+        conversationId: 'conversation-2',
+      }]),
+    };
+    view.queueCollaborationMessage('room-1', {
+      originTabId: 'closed-tab',
+      content: 'Continue',
+    });
+
+    await view.drainNextCollaborationMessage('room-1');
+
+    expect(view.routeCollaborationMessage)
+      .toHaveBeenCalledWith('tab-2', 'Continue', undefined);
+    expect(view.queuedCollaborationMessages.has('room-1')).toBe(false);
   });
 });
 
@@ -316,6 +498,7 @@ describe('ClaudianView collaboration room capacity', () => {
         updateConversation: jest.fn().mockResolvedValue(undefined),
       },
       reconcileCollaborationTimelines: jest.fn().mockResolvedValue(undefined),
+      verifyCollaborationParticipantRuntimes: jest.fn().mockResolvedValue(undefined),
       tabManager: {
         createTab,
         getAllTabs: jest.fn().mockReturnValue([blankTab]),
@@ -335,6 +518,206 @@ describe('ClaudianView collaboration room capacity', () => {
     );
     expect(createTab).toHaveBeenCalledTimes(2);
     expect(roomCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses a blank tab when reopening an archived room at capacity', async () => {
+    const blankTab: any = {
+      id: 'blank-tab',
+      conversationId: null,
+      lifecycleState: 'blank',
+      state: { isRewinding: false, isStreaming: false },
+      controllers: {
+        conversationController: { createNew: jest.fn().mockResolvedValue(undefined) },
+      },
+    };
+    const room = {
+      version: 1,
+      id: 'room-1',
+      title: 'Restored room',
+      status: 'archived',
+      createdAt: 1,
+      updatedAt: 2,
+      events: [],
+      participants: [
+        { id: 'personal', providerId: 'claude', conversationId: 'conversation-1' },
+        { id: 'company', providerId: 'claude', conversationId: 'conversation-2' },
+        { id: 'codex', providerId: 'codex', conversationId: 'conversation-3' },
+      ],
+    };
+    const createTab = jest.fn(async (conversationId: string) => ({
+      id: `created-${conversationId}`,
+      conversationId,
+    }));
+    const openConversation = jest.fn().mockResolvedValue(undefined);
+    const reopen = jest.fn().mockResolvedValue(undefined);
+    const view = Object.create(ClaudianView.prototype) as any;
+    Object.assign(view, {
+      plugin: {
+        settings: { maxTabs: 3 },
+        storage: { rooms: { list: jest.fn().mockResolvedValue([room]), reopen } },
+      },
+      reconcileCollaborationTimelines: jest.fn().mockResolvedValue(undefined),
+      tabManager: {
+        closeTab: jest.fn().mockResolvedValue(undefined),
+        createTab,
+        getAllTabs: jest.fn().mockReturnValue([blankTab]),
+        getTab: jest.fn().mockReturnValue(blankTab),
+        getTabCount: jest.fn().mockReturnValue(1),
+        openConversation,
+        switchToTab: jest.fn().mockResolvedValue(undefined),
+      },
+      updateTabBarVisibility: jest.fn(),
+    });
+
+    await expect(view.reopenLatestCollaboration()).resolves.toBe(true);
+
+    expect(openConversation).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.objectContaining({ preferNewTab: false }),
+    );
+    expect(createTab).toHaveBeenCalledTimes(2);
+    expect(reopen).toHaveBeenCalledWith('room-1');
+  });
+
+  it('reuses a blank tab when restoring a missing room participant', async () => {
+    const blankTab: any = {
+      id: 'blank-tab',
+      conversationId: null,
+      lifecycleState: 'blank',
+      state: { isRewinding: false, isStreaming: false },
+      controllers: {
+        conversationController: { createNew: jest.fn().mockResolvedValue(undefined) },
+      },
+    };
+    const openConversation = jest.fn().mockResolvedValue(undefined);
+    const view = Object.create(ClaudianView.prototype) as any;
+    Object.assign(view, {
+      plugin: {
+        getConversationSync: jest.fn().mockReturnValue({ id: 'conversation-1' }),
+      },
+      reconcileCollaborationTimelines: jest.fn().mockResolvedValue(undefined),
+      tabManager: {
+        closeTab: jest.fn().mockResolvedValue(undefined),
+        createTab: jest.fn(),
+        getAllTabs: jest.fn().mockReturnValue([blankTab]),
+        getTab: jest.fn().mockReturnValue(blankTab),
+        openConversation,
+        switchToTab: jest.fn().mockResolvedValue(undefined),
+      },
+      updateTabBarVisibility: jest.fn(),
+    });
+
+    await expect(view.restoreMissingCollaborationParticipants({
+      participants: [{
+        id: 'company',
+        providerId: 'claude',
+        conversationId: 'conversation-1',
+      }],
+    }, ['company'])).resolves.toBe(true);
+
+    expect(openConversation).toHaveBeenCalledWith(
+      'conversation-1',
+      { activate: false, preferNewTab: false },
+    );
+    expect(view.tabManager.createTab).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate participant tabs that are already open during room recovery', async () => {
+    const room = {
+      version: 1,
+      id: 'room-1',
+      title: 'Partially open room',
+      status: 'archived',
+      createdAt: 1,
+      updatedAt: 2,
+      events: [],
+      participants: [
+        { id: 'company', providerId: 'claude', conversationId: 'conversation-open' },
+        { id: 'codex', providerId: 'codex', conversationId: 'conversation-missing' },
+      ],
+    };
+    const existingTab = {
+      id: 'existing',
+      conversationId: 'conversation-open',
+      lifecycleState: 'bound_warm',
+      state: { isRewinding: false, isStreaming: false },
+    };
+    const createTab = jest.fn().mockResolvedValue({
+      id: 'created',
+      conversationId: 'conversation-missing',
+    });
+    const view = Object.create(ClaudianView.prototype) as any;
+    Object.assign(view, {
+      plugin: {
+        settings: { maxTabs: 2 },
+        storage: {
+          rooms: {
+            list: jest.fn().mockResolvedValue([room]),
+            reopen: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+      },
+      reconcileCollaborationTimelines: jest.fn().mockResolvedValue(undefined),
+      tabManager: {
+        closeTab: jest.fn().mockResolvedValue(undefined),
+        createTab,
+        getAllTabs: jest.fn().mockReturnValue([existingTab]),
+        getTabCount: jest.fn().mockReturnValue(1),
+      },
+      updateTabBarVisibility: jest.fn(),
+    });
+
+    await expect(view.reopenLatestCollaboration()).resolves.toBe(true);
+
+    expect(createTab).toHaveBeenCalledTimes(1);
+    expect(createTab).toHaveBeenCalledWith(
+      'conversation-missing',
+      undefined,
+      { activate: true },
+    );
+  });
+
+  it('hydrates a participant tab created during send readiness recovery', async () => {
+    const tabs: any[] = [];
+    const restoredTab: any = {
+      id: 'restored-tab',
+      conversationId: 'conversation-company',
+      state: { currentConversationId: null },
+      hydrationState: 'idle',
+    };
+    const switchToTab = jest.fn(async (tabId: string) => {
+      if (tabId === restoredTab.id) {
+        restoredTab.state.currentConversationId = restoredTab.conversationId;
+        restoredTab.hydrationState = 'ready';
+      }
+    });
+    const view = Object.create(ClaudianView.prototype) as any;
+    Object.assign(view, {
+      restoreMissingCollaborationParticipants: jest.fn(async () => {
+        tabs.push(restoredTab);
+        return true;
+      }),
+      tabManager: {
+        getAllTabs: jest.fn(() => tabs),
+        getTab: jest.fn((tabId: string) => (
+          tabId === 'origin-tab' ? { id: 'origin-tab' } : undefined
+        )),
+        switchToTab,
+      },
+    });
+
+    await expect(view.ensureCollaborationRecipientsReady({
+      participants: [{
+        id: 'company',
+        providerId: 'claude',
+        conversationId: 'conversation-company',
+      }],
+    }, ['company'], 'origin-tab')).resolves.toBe(true);
+
+    expect(view.restoreMissingCollaborationParticipants)
+      .toHaveBeenCalledWith(expect.anything(), ['company']);
+    expect(switchToTab).toHaveBeenNthCalledWith(1, 'restored-tab');
+    expect(switchToTab).toHaveBeenLastCalledWith('origin-tab');
   });
 });
 
