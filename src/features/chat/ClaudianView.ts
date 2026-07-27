@@ -1220,7 +1220,7 @@ export class ClaudianView extends ItemView {
                 latest.workQueue,
                 task.id,
                 'failed',
-                { actorId: current.reviewerId },
+                { actorId: current.reviewerId, failureReason: message },
               );
               await this.plugin.storage.rooms.updateWorkQueue(
                 room.id,
@@ -1319,7 +1319,10 @@ export class ClaudianView extends ItemView {
             latest.workQueue,
             task.id,
             review.verdict === 'approve' ? 'done' : 'failed',
-            { actorId: task.reviewerId },
+            {
+              actorId: task.reviewerId,
+              failureReason: review.findings.join('; ') || 'Reviewer requested changes.',
+            },
           );
           const reviewedTask = next.tasks.find(candidate => candidate.id === task.id);
           if (reviewedTask?.evidence) {
@@ -2377,7 +2380,7 @@ export class ClaudianView extends ItemView {
     ));
     const workflowId = `task-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     new Notice(`${task.id} started with ${task.ownerId}; ${task.reviewerId} will review.`);
-    const failStartedTask = async (): Promise<void> => {
+    const failStartedTask = async (reason: string): Promise<void> => {
       const latest = await this.plugin.storage.rooms.get(roomId);
       if (latest?.workQueue) {
         const latestTask = latest.workQueue.tasks.find(candidate => candidate.id === taskId);
@@ -2386,7 +2389,7 @@ export class ClaudianView extends ItemView {
             latest.workQueue,
             taskId,
             'failed',
-            { actorId: task.reviewerId },
+            { actorId: task.reviewerId, failureReason: reason },
           );
           await this.plugin.storage.rooms.updateWorkQueue(
             roomId,
@@ -2412,11 +2415,13 @@ export class ClaudianView extends ItemView {
         },
       );
     } catch (error) {
-      await failStartedTask();
+      await failStartedTask(
+        error instanceof Error ? error.message : `Could not dispatch ${task.id}`,
+      );
       throw error;
     }
     if (!handled) {
-      await failStartedTask();
+      await failStartedTask(`Could not route ${task.id}`);
       throw new Error(`Could not route ${task.id}`);
     }
   }
@@ -2459,7 +2464,10 @@ export class ClaudianView extends ItemView {
       room.workQueue,
       taskId,
       'failed',
-      { actorId: 'system' },
+      {
+        actorId: 'system',
+        failureReason: `Interrupted during ${task.status}; no active delivery was found.`,
+      },
     );
     await this.plugin.storage.rooms.updateWorkQueue(
       roomId,

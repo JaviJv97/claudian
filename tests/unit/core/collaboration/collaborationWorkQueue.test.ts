@@ -325,11 +325,13 @@ describe('collaboration work queue', () => {
     const failed = transitionCollaborationTask(running, 'TASK-001', 'failed', {
       actorId: 'system',
       now: 22,
+      failureReason: 'Provider process stopped.',
     });
     const ready = transitionCollaborationTask(failed, 'TASK-001', 'ready', {
       actorId: 'codex',
       now: 23,
     });
+    expect(failed.tasks[0].failure?.reason).toBe('Provider process stopped.');
     const secondRun = transitionCollaborationTask(ready, 'TASK-001', 'running', {
       actorId: 'codex',
       now: 24,
@@ -365,6 +367,7 @@ describe('collaboration work queue', () => {
     });
 
     expect(running.tasks[0].evidence).toBeUndefined();
+    expect(running.tasks[0].failure).toBeUndefined();
     expect(running.tasks[0].evidenceHistory).toHaveLength(1);
     expect(running.tasks[0].attempts).toBe(2);
   });

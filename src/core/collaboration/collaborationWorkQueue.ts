@@ -14,6 +14,7 @@ export interface CollaborationTaskTransitionOptions {
   actorId: string;
   now?: number;
   evidence?: CollaborationTaskEvidence;
+  failureReason?: string;
 }
 
 export interface CollaborationTaskScopeConflict {
@@ -485,7 +486,14 @@ export function transitionCollaborationTask(
       task.evidenceHistory.push(structuredClone(task.evidence));
       delete task.evidence;
     }
+    delete task.failure;
     task.attempts += 1;
+  }
+  if (nextStatus === 'failed') {
+    task.failure = {
+      reason: options.failureReason?.trim() || 'Task execution or review failed.',
+      failedAt: options.now ?? Date.now(),
+    };
   }
   if (nextStatus === 'ready' && task.attempts >= task.maxAttempts) {
     throw new Error(`${task.id} has exhausted its retry budget`);

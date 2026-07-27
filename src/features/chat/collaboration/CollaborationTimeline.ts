@@ -1040,6 +1040,13 @@ export class CollaborationTimeline {
           });
         }
       }
+      if (task.failure) {
+        item.createDiv({
+          cls: 'claudian-collaboration-work-task-failure',
+          text: task.failure.reason,
+          attr: { role: 'status' },
+        });
+      }
     }
     if (room.workQueueHistory?.length) {
       const history = panel.createEl('details', {

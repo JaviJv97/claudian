@@ -71,6 +71,10 @@ export interface CollaborationWorkTask {
   maxAttempts: number;
   evidence?: CollaborationTaskEvidence;
   evidenceHistory?: CollaborationTaskEvidence[];
+  failure?: {
+    reason: string;
+    failedAt: number;
+  };
   createdAt: number;
   updatedAt: number;
 }
