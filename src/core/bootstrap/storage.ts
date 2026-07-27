@@ -6,6 +6,7 @@ import type {
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
+  CollaborationRoutingSettings,
   CollaborationWorkQueue,
 } from '../types';
 
@@ -31,6 +32,11 @@ export interface CollaborationRoomStorage {
   updateDiscussionMode(
     roomId: string,
     mode: CollaborationDiscussionMode,
+    now?: number,
+  ): Promise<CollaborationRoom>;
+  updateRoutingSettings(
+    roomId: string,
+    settings: CollaborationRoutingSettings,
     now?: number,
   ): Promise<CollaborationRoom>;
   updateParticipantResourcePolicy(

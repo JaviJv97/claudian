@@ -18,6 +18,12 @@ An Obsidian plugin that embeds AI coding agents (Claude Code, Codex, Grok, Openc
 > survives restart. The room presents one attributed timeline with live agent
 > output, image attachments, independent delivery states and stop/retry
 > controls. Any agent response can be handed to the other agent for review.
+> Rooms also support configurable multi-cycle round tables, deterministic automatic
+> routing, selectable starter and synthesizer roles, persisted facilitator
+> selection, and direct
+> Active/Preserve/Muted participant controls. See
+> [`docs/COLLABORATION-ROUTING.md`](docs/COLLABORATION-ROUTING.md) and the
+> [`routing milestone handoff`](docs/COLLABORATION-ROUTING-MILESTONE.md).
 
 ## Features & Usage
 

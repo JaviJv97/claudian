@@ -111,7 +111,7 @@ export function getRoutableCollaborationParticipantIds(
   return room.participants.flatMap((participant) => {
     const participantId = getCollaborationParticipantId(participant);
     const mode = participant.resourcePolicy?.mode ?? 'active';
-    if (mode === 'unavailable') return [];
+    if (mode === 'unavailable' || mode === 'muted') return [];
     if (autonomousWorkflow) return mode === 'active' ? [participantId] : [];
     const explicitlyMentioned = new RegExp(
       `(^|\\s)@${escapeRegExp(participantId)}\\b`,
@@ -141,6 +141,19 @@ export function getPreservedMentionedParticipantIds(
   return room.participants.flatMap((participant) => {
     const participantId = getCollaborationParticipantId(participant);
     return participant.resourcePolicy?.mode === 'preserve'
+      && new RegExp(`(^|\\s)@${escapeRegExp(participantId)}\\b`, 'i').test(content)
+      ? [participantId]
+      : [];
+  });
+}
+
+export function getMutedMentionedParticipantIds(
+  room: CollaborationRoom,
+  content: string,
+): string[] {
+  return room.participants.flatMap((participant) => {
+    const participantId = getCollaborationParticipantId(participant);
+    return participant.resourcePolicy?.mode === 'muted'
       && new RegExp(`(^|\\s)@${escapeRegExp(participantId)}\\b`, 'i').test(content)
       ? [participantId]
       : [];

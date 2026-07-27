@@ -11,6 +11,17 @@ function createRoom(): CollaborationRoom {
     title: 'Portable room',
     status: 'active',
     discussionMode: 'deliberation',
+    routing: {
+      selection: 'auto',
+      defaultMode: 'round-table',
+      roundTable: {
+        participantOrder: ['codex'],
+        startingParticipantId: 'codex',
+        cycles: 2,
+        rotateStarter: false,
+      },
+      synthesizerParticipantId: 'codex',
+    },
     participantLastSeenEventIds: { codex: 'event-1' },
     createdAt: 10,
     updatedAt: 20,
@@ -89,6 +100,26 @@ describe('portable collaboration rooms', () => {
     }))).toThrow('credential-like field');
   });
 
+  it('imports legacy schema version 1 and exports routing in version 2', () => {
+    const portable = createPortableCollaborationRoom(createRoom(), { exportedAt: 30 });
+    expect(portable.schemaVersion).toBe(2);
+    expect(portable.routing?.roundTable.cycles).toBe(2);
+
+    const legacy = {
+      ...portable,
+      schemaVersion: 1,
+      routing: undefined,
+    };
+    expect(parsePortableCollaborationRoom(JSON.stringify(legacy))).toMatchObject({
+      schemaVersion: 1,
+      discussionMode: 'deliberation',
+    });
+    expect(() => parsePortableCollaborationRoom(JSON.stringify({
+      ...portable,
+      schemaVersion: 3,
+    }))).toThrow('invalid or unsupported');
+  });
+
   it('records machine-local path references without rejecting historical content', () => {
     const room = createRoom();
     room.events[0].content = 'Read /home/javierj/private/file.md and C:\\Work\\handoff.md';
@@ -99,5 +130,37 @@ describe('portable collaboration rooms', () => {
       '/home/javierj/private/file.md',
       'C:\\Work\\handoff.md',
     ]);
+  });
+
+  it('does not carry provider unavailability to another machine', () => {
+    const room = createRoom();
+    room.participants[0].resourcePolicy = { mode: 'unavailable' };
+
+    expect(createPortableCollaborationRoom(room).participants[0].resourceMode)
+      .toBeUndefined();
+  });
+
+  it('rejects invalid runtime modes from untrusted portable JSON', () => {
+    const portable = createPortableCollaborationRoom(createRoom());
+    expect(() => parsePortableCollaborationRoom(JSON.stringify({
+      ...portable,
+      discussionMode: 'surprise-mode',
+    }))).toThrow('invalid or unsupported');
+    expect(() => parsePortableCollaborationRoom(JSON.stringify({
+      ...portable,
+      participants: [{ ...portable.participants[0], resourceMode: 'always-run' }],
+    }))).toThrow('invalid or unsupported');
+  });
+
+  it('accepts legacy unavailability without carrying machine health forward', () => {
+    const portable = createPortableCollaborationRoom(createRoom());
+    const parsed = parsePortableCollaborationRoom(JSON.stringify({
+      ...portable,
+      schemaVersion: 1,
+      routing: undefined,
+      participants: [{ ...portable.participants[0], resourceMode: 'unavailable' }],
+    }));
+
+    expect(parsed.participants[0].resourceMode).toBeUndefined();
   });
 });

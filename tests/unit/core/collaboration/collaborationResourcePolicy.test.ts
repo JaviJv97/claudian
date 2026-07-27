@@ -1,5 +1,6 @@
 import {
   appendQuotaHistory,
+  getMutedMentionedParticipantIds,
   getPreservedMentionedParticipantIds,
   getQuotaProjection,
   getQuotaRoutingRecommendation,
@@ -15,6 +16,7 @@ const room = {
     { id: 'personal', resourcePolicy: { mode: 'preserve' } },
     { id: 'company', resourcePolicy: { mode: 'active' } },
     { id: 'codex', resourcePolicy: { mode: 'unavailable' } },
+    { id: 'muted', resourcePolicy: { mode: 'muted' } },
   ],
 } as CollaborationRoom;
 
@@ -37,6 +39,15 @@ describe('collaborationResourcePolicy', () => {
   it('identifies explicit mentions that must not fall through to other agents', () => {
     expect(getUnavailableMentionedParticipantIds(room, '@codex answer this'))
       .toEqual(['codex']);
+  });
+
+  it('never routes to a muted participant, including explicit mentions', () => {
+    expect(getRoutableCollaborationParticipantIds(room, '@muted answer this', false))
+      .toEqual(['company']);
+  });
+
+  it('identifies muted mentions so they cannot fall through to active agents', () => {
+    expect(getMutedMentionedParticipantIds(room, '@muted answer this')).toEqual(['muted']);
   });
 
   it('identifies an explicit preserve-mode quota override', () => {

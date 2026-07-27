@@ -11,6 +11,7 @@ import {
 } from '../../core/collaboration/collaborationDeliberation';
 import {
   appendQuotaHistory,
+  getMutedMentionedParticipantIds,
   getPreservedMentionedParticipantIds,
   getRoutableCollaborationParticipantIds,
   getUnavailableMentionedParticipantIds,
@@ -20,8 +21,13 @@ import {
   createCollaborationMemberships,
   createCollaborationRoomId,
   getCollaborationParticipantId,
+  hasExplicitCollaborationRecipient,
   resolveCollaborationTurn,
 } from '../../core/collaboration/collaborationRoom';
+import {
+  normalizeCollaborationRoutingSettings,
+  resolveCollaborationEffectiveRoute,
+} from '../../core/collaboration/collaborationRouting';
 import {
   buildCollaborationTaskExecutionInstruction,
   buildCollaborationTaskReviewInstruction,
@@ -96,6 +102,7 @@ import {
   chooseCollaborationParticipants,
   toClaudeParticipantChoices,
 } from './collaboration/CollaborationRoomModal';
+import { CollaborationRoutingModal } from './collaboration/CollaborationRoutingModal';
 import { groupCollaborationTabBarItems } from './collaboration/collaborationTabs';
 import { CollaborationTimeline } from './collaboration/CollaborationTimeline';
 import { CollaborationUsageDashboardModal } from './collaboration/CollaborationUsageDashboardModal';
@@ -167,6 +174,7 @@ export class ClaudianView extends ItemView {
   private collaborationTimelines = new Map<TabId, CollaborationTimeline>();
   private collaborationReconcileQueue: Promise<void> = Promise.resolve();
   private activeCollaborationDeliveries = new Map<string, string>();
+  private activeCollaborationRoundTables = new Set<string>();
   private queuedCollaborationMessages = new Map<string, QueuedCollaborationMessage[]>();
   private quotaRefreshInterval: number | null = null;
   private quotaRefreshFlights = new Map<string, Promise<void>>();
@@ -417,6 +425,7 @@ export class ClaudianView extends ItemView {
     for (const timeline of this.collaborationTimelines?.values() ?? []) timeline.destroy();
     this.collaborationTimelines?.clear();
     this.queuedCollaborationMessages?.clear();
+    this.activeCollaborationRoundTables?.clear();
     this.quotaRefreshFlights?.clear();
     this.quotaRefreshBackoff?.clear();
 
@@ -850,6 +859,7 @@ export class ClaudianView extends ItemView {
         title: portable.title,
         status: 'active',
         discussionMode: portable.discussionMode,
+        routing: portable.routing ? structuredClone(portable.routing) : undefined,
         participantLastSeenEventIds: {},
         createdAt: portable.createdAt,
         updatedAt: portable.updatedAt,
@@ -1136,6 +1146,11 @@ export class ClaudianView extends ItemView {
       new Notice(`${unavailableMentions.join(', ')} is marked unavailable.`);
       return true;
     }
+    const mutedMentions = getMutedMentionedParticipantIds(room, content);
+    if (mutedMentions.length > 0) {
+      new Notice(`${mutedMentions.join(', ')} is muted. Set it to active for this turn.`);
+      return true;
+    }
     const preservedOverrides = getPreservedMentionedParticipantIds(room, content);
     if (preservedOverrides.length > 0) {
       new Notice(
@@ -1149,7 +1164,7 @@ export class ClaudianView extends ItemView {
       ? [workflowTask.ownerId, workflowTask.reviewerId].filter(participantId => (
         room.participants.some(participant => (
           getCollaborationParticipantId(participant) === participantId
-          && participant.resourcePolicy?.mode !== 'unavailable'
+          && (participant.resourcePolicy?.mode ?? 'active') === 'active'
         ))
       ))
       : getRoutableCollaborationParticipantIds(
@@ -1164,11 +1179,14 @@ export class ClaudianView extends ItemView {
     const collaborationTurn = resolveCollaborationTurn(content, routableParticipantIds);
     if (
       !workflow
-      && collaborationTurn.recipientIds.some(participantId => (
-        this.activeCollaborationDeliveries.has(
-          this.getCollaborationDeliveryKey(room.id, participantId),
-        )
-      ))
+      && (
+        this.activeCollaborationRoundTables?.has(room.id)
+        || collaborationTurn.recipientIds.some(participantId => (
+          this.activeCollaborationDeliveries.has(
+            this.getCollaborationDeliveryKey(room.id, participantId),
+          )
+        ))
+      )
     ) {
       const queued = this.queueCollaborationMessage(room.id, {
         originTabId,
@@ -1180,25 +1198,7 @@ export class ClaudianView extends ItemView {
         : 'This message is already queued for the next collaboration round.');
       return true;
     }
-    const discussionMode = room.discussionMode ?? 'parallel';
-    if (
-      (discussionMode === 'deliberation' || workflow)
-      && routableParticipantIds.length < 2
-    ) {
-      new Notice(
-        workflow
-          ? 'Autonomous workflows require at least two active agents for cross-review.'
-          : 'Deliberation requires at least two available agents.',
-      );
-      return true;
-    }
-    if (
-      discussionMode === 'mentioned-only'
-      && !/(^|\s)@(?:all|[A-Za-z0-9][A-Za-z0-9._-]*)\b/i.test(content)
-    ) {
-      new Notice('Mention an agent or choose a recipient in mentioned-only mode.');
-      return true;
-    }
+    let discussionMode = room.discussionMode ?? 'parallel';
     if (!await this.ensureCollaborationRecipientsReady(
       room,
       collaborationTurn.recipientIds,
@@ -1223,6 +1223,37 @@ export class ClaudianView extends ItemView {
         ])),
         markdownFiles.map(file => file.path),
       );
+    const routingSettings = normalizeCollaborationRoutingSettings(
+      room.routing,
+      routableParticipantIds,
+      discussionMode,
+    );
+    const effectiveRoute = resolveCollaborationEffectiveRoute({
+      content: collaborationTurn.content,
+      explicitRecipientIds: collaborationTurn.recipientIds,
+      explicitRecipients: hasExplicitCollaborationRecipient(content, routableParticipantIds),
+      eligibleParticipantIds: routableParticipantIds,
+      sharedReferencedFiles,
+      settings: workflow
+        ? { ...routingSettings, selection: 'manual', defaultMode: discussionMode }
+        : routingSettings,
+    });
+    discussionMode = workflow ? discussionMode : effectiveRoute.mode;
+    if ((discussionMode === 'deliberation' || workflow) && effectiveRoute.recipientIds.length < 2) {
+      new Notice(
+        workflow
+          ? 'Autonomous workflows require at least two active agents for cross-review.'
+          : 'Deliberation requires at least two available agents.',
+      );
+      return true;
+    }
+    if (
+      discussionMode === 'mentioned-only'
+      && !hasExplicitCollaborationRecipient(content, routableParticipantIds)
+    ) {
+      new Notice('Mention an agent or choose a recipient in mentioned-only mode.');
+      return true;
+    }
     const captureSharedFileSnapshot = async () => captureCollaborationFileSnapshot(
       (await Promise.all(sharedReferencedFiles.map(async (path) => {
         const stat = await this.plugin.app.vault.adapter.stat(path);
@@ -1769,8 +1800,11 @@ export class ClaudianView extends ItemView {
 
     if (discussionMode === 'deliberation') {
       const deliberationId = `deliberation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const allParticipantIds = routableParticipantIds;
-      const synthesizerId = allParticipantIds.at(-1);
+      const allParticipantIds = effectiveRoute.recipientIds;
+      const synthesizerId = effectiveRoute.synthesizerParticipantId
+        && allParticipantIds.includes(effectiveRoute.synthesizerParticipantId)
+        ? effectiveRoute.synthesizerParticipantId
+        : allParticipantIds.at(-1);
       const runPhase = async (
         phase: CollaborationDeliberationPhase,
         recipientIds: string[],
@@ -1787,7 +1821,11 @@ export class ClaudianView extends ItemView {
           strategy,
           eventAuthorId: phase === 'position' ? 'user' : 'system',
           eventKind: phase === 'position' ? 'message' : 'system',
-          eventMetadata: { deliberationId, deliberationPhase: phase },
+          eventMetadata: {
+            deliberationId,
+            deliberationPhase: phase,
+            effectiveRoute,
+          },
           prepareContent: participant => buildDeliberationInstruction(
             room,
             phase,
@@ -1921,39 +1959,88 @@ export class ClaudianView extends ItemView {
       return true;
     }
 
-    const turn = await this.collaborationCoordinator.send(room, {
-      content: collaborationTurn.content,
-      recipientIds: collaborationTurn.recipientIds,
-      recipientContent: collaborationTurn.recipientContent,
-      attachments: images,
-      strategy: discussionMode === 'round-table' || sharedReferencedFiles.length > 0
-        ? 'sequential'
-        : 'parallel',
-      prepareContent: (participant, event) => buildCollaborationPrompt(
-        room,
-        getCollaborationParticipantId(participant),
-        event.recipientContent?.[getCollaborationParticipantId(participant)] ?? event.content,
-        { currentEventId: event.id },
-      ),
-      dispatch,
-    });
-    for (const participantId of collaborationTurn.recipientIds) {
-      this.activeCollaborationDeliveries.set(
-        this.getCollaborationDeliveryKey(room.id, participantId),
-        turn.event.id,
-      );
+    const roundTableId = discussionMode === 'round-table'
+      ? `round-table-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      : undefined;
+    const cycleOrders = discussionMode === 'round-table'
+      ? effectiveRoute.cycleOrders
+      : [effectiveRoute.recipientIds];
+    if (roundTableId) {
+      this.activeCollaborationRoundTables ??= new Set<string>();
+      this.activeCollaborationRoundTables.add(room.id);
     }
-    this.refreshCollaborationTimelines(room.id);
-    void turn.completion.finally(() => {
-      for (const participantId of collaborationTurn.recipientIds) {
-        const key = this.getCollaborationDeliveryKey(room.id, participantId);
-        if (this.activeCollaborationDeliveries.get(key) === turn.event.id) {
-          this.activeCollaborationDeliveries.delete(key);
+    try {
+      for (const [cycleIndex, recipientIds] of cycleOrders.entries()) {
+        const turn = await this.collaborationCoordinator.send(room, {
+        content: cycleIndex === 0
+          ? collaborationTurn.content
+          : `Round-table refinement cycle ${cycleIndex + 1} of ${cycleOrders.length}`,
+        recipientIds,
+        recipientContent: cycleIndex === 0 ? collaborationTurn.recipientContent : undefined,
+        attachments: cycleIndex === 0 ? images : undefined,
+        strategy: discussionMode === 'round-table' || sharedReferencedFiles.length > 0
+          ? 'sequential'
+          : 'parallel',
+        eventAuthorId: cycleIndex === 0 ? 'user' : 'system',
+        eventKind: cycleIndex === 0 ? 'message' : 'system',
+        eventMetadata: {
+          effectiveRoute,
+          roundTableCycle: roundTableId
+            ? { id: roundTableId, index: cycleIndex + 1, total: cycleOrders.length }
+            : undefined,
+        },
+        prepareContent: (participant, event) => buildCollaborationPrompt(
+          room,
+          getCollaborationParticipantId(participant),
+          cycleIndex === 0
+            ? event.recipientContent?.[getCollaborationParticipantId(participant)] ?? event.content
+            : `Review the prior round-table cycle and refine, challenge, or converge on the original request: ${collaborationTurn.content}`,
+          { currentEventId: event.id },
+        ),
+        dispatch,
+        });
+        room.events.push(structuredClone(turn.event));
+        for (const participantId of recipientIds) {
+          this.activeCollaborationDeliveries.set(
+            this.getCollaborationDeliveryKey(room.id, participantId),
+            turn.event.id,
+          );
+        }
+        this.refreshCollaborationTimelines(room.id);
+        if (discussionMode !== 'round-table') {
+          void turn.completion.finally(() => {
+            for (const participantId of recipientIds) {
+              const key = this.getCollaborationDeliveryKey(room.id, participantId);
+              if (this.activeCollaborationDeliveries.get(key) === turn.event.id) {
+                this.activeCollaborationDeliveries.delete(key);
+              }
+            }
+            this.refreshCollaborationTimelines(room.id);
+            void this.drainNextCollaborationMessage(room.id);
+          });
+          return true;
+        }
+        await turn.completion;
+        for (const participantId of recipientIds) {
+          const key = this.getCollaborationDeliveryKey(room.id, participantId);
+          if (this.activeCollaborationDeliveries.get(key) === turn.event.id) {
+            this.activeCollaborationDeliveries.delete(key);
+          }
+        }
+        this.refreshCollaborationTimelines(room.id);
+        if (Object.values(turn.event.delivery).some(delivery => (
+          delivery.status !== 'completed'
+        ))) {
+          new Notice(`Round table stopped after cycle ${cycleIndex + 1}.`);
+          break;
         }
       }
-      this.refreshCollaborationTimelines(room.id);
-      void this.drainNextCollaborationMessage(room.id);
-    });
+    } finally {
+      if (roundTableId) {
+        this.activeCollaborationRoundTables.delete(room.id);
+        void this.drainNextCollaborationMessage(room.id);
+      }
+    }
     return true;
   }
 
@@ -2252,6 +2339,31 @@ export class ClaudianView extends ItemView {
           plugin: this.plugin,
           roomId,
           discussionMode: room.discussionMode ?? 'parallel',
+          routingSettings: normalizeCollaborationRoutingSettings(
+            room.routing,
+            room.participants.map(getCollaborationParticipantId),
+            room.discussionMode ?? 'parallel',
+          ),
+          onEditRoutingSettings: () => {
+            const participantLabels = Object.fromEntries(room.participants.map(participant => [
+              getCollaborationParticipantId(participant),
+              participant.label ?? getCollaborationParticipantId(participant),
+            ]));
+            new CollaborationRoutingModal(
+              this.plugin.app,
+              normalizeCollaborationRoutingSettings(
+                room.routing,
+                room.participants.map(getCollaborationParticipantId),
+                room.discussionMode ?? 'parallel',
+              ),
+              participantLabels,
+              async settings => {
+                await this.plugin.storage.rooms.updateRoutingSettings(roomId, settings);
+                await this.reconcileCollaborationTimelines();
+                new Notice('Collaboration routing updated.');
+              },
+            ).open();
+          },
           onDiscussionModeChange: async (mode) => {
             await this.plugin.storage.rooms.updateDiscussionMode(roomId, mode);
             new Notice(
@@ -2508,6 +2620,24 @@ export class ClaudianView extends ItemView {
               },
             ).open();
           },
+          onQuickResourceModeChange: async (participantId, mode) => {
+            const latestRoom = await this.plugin.storage.rooms.get(roomId);
+            const participant = latestRoom?.participants.find(candidate => (
+              getCollaborationParticipantId(candidate) === participantId
+            ));
+            if (!participant) throw new Error('Collaboration participant not found.');
+            if (mode === 'unavailable') return;
+            await this.plugin.storage.rooms.updateParticipantResourcePolicy(
+              roomId,
+              participantId,
+              {
+                ...(participant.resourcePolicy ?? {}),
+                mode,
+              },
+            );
+            await this.reconcileCollaborationTimelines();
+            new Notice(`${participant.label ?? participantId} set to ${mode}.`);
+          },
           onApplyQuotaRecommendation: async (participantId) => {
             const latestRoom = await this.plugin.storage.rooms.get(roomId);
             const latestParticipant = latestRoom?.participants.find(candidate => (
@@ -2656,7 +2786,10 @@ export class ClaudianView extends ItemView {
       const queue = approveCollaborationWorkQueue(
         room.workQueue,
         room.participants
-          .filter(participant => participant.resourcePolicy?.mode !== 'unavailable')
+          .filter(participant => (
+            participant.resourcePolicy?.mode !== 'unavailable'
+            && participant.resourcePolicy?.mode !== 'muted'
+          ))
           .map(getCollaborationParticipantId),
       );
       await this.plugin.storage.rooms.updateWorkQueue(
@@ -2688,12 +2821,16 @@ export class ClaudianView extends ItemView {
       getCollaborationParticipantId(candidate) === task.reviewerId
     ));
     if (!owner || !reviewer) throw new Error('Task owner or reviewer is unavailable');
-    if (owner.resourcePolicy?.mode === 'unavailable') {
-      new Notice(`${task.ownerId} is unavailable. Reassign the task before running it.`);
+    if (owner.resourcePolicy && owner.resourcePolicy.mode !== 'active') {
+      new Notice(
+        `${task.ownerId} is ${owner.resourcePolicy.mode}. Set it to active or reassign the task.`,
+      );
       return;
     }
-    if (reviewer.resourcePolicy?.mode === 'unavailable') {
-      new Notice(`${task.reviewerId} is unavailable. Reassign the reviewer before running it.`);
+    if (reviewer.resourcePolicy && reviewer.resourcePolicy.mode !== 'active') {
+      new Notice(
+        `${task.reviewerId} is ${reviewer.resourcePolicy.mode}. Set it to active or reassign it.`,
+      );
       return;
     }
     const running = transitionCollaborationTask(
@@ -2852,7 +2989,10 @@ export class ClaudianView extends ItemView {
       ownerId,
       reviewerId,
       room.participants
-        .filter(participant => participant.resourcePolicy?.mode !== 'unavailable')
+        .filter(participant => (
+          participant.resourcePolicy?.mode !== 'unavailable'
+          && participant.resourcePolicy?.mode !== 'muted'
+        ))
         .map(getCollaborationParticipantId),
     );
     await this.plugin.storage.rooms.updateWorkQueue(
@@ -3244,6 +3384,7 @@ export class ClaudianView extends ItemView {
   }
 
   private async drainNextCollaborationMessage(roomId: string): Promise<void> {
+    if (this.activeCollaborationRoundTables?.has(roomId)) return;
     if ([...this.activeCollaborationDeliveries.keys()].some(key => (
       key.startsWith(`${roomId}:`)
     ))) return;

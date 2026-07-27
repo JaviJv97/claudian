@@ -35,15 +35,22 @@ export class CollaborationResourcePolicyModal extends Modal {
     }
     new Setting(this.contentEl)
       .setName('Routing mode')
-      .setDesc('Preserve skips group and autonomous turns but still allows an explicit @mention.')
-      .addDropdown(dropdown => dropdown
-        .addOption('active', 'Active')
-        .addOption('preserve', 'Preserve quota')
-        .addOption('unavailable', 'Unavailable')
-        .setValue(this.mode)
-        .onChange((value) => {
+      .setDesc(this.mode === 'unavailable'
+        ? 'Unavailable is controlled by provider health and cannot be changed here.'
+        : 'Preserve allows explicit mentions; Muted blocks every turn until re-enabled.')
+      .addDropdown((dropdown) => {
+        if (this.mode === 'unavailable') {
+          dropdown.addOption('unavailable', 'Unavailable').setDisabled(true);
+        } else {
+          dropdown
+            .addOption('active', 'Active')
+            .addOption('preserve', 'Preserve quota')
+            .addOption('muted', 'Muted');
+        }
+        dropdown.setValue(this.mode).onChange((value) => {
           this.mode = value as CollaborationParticipantResourcePolicy['mode'];
-        }));
+        });
+      });
     new Setting(this.contentEl)
       .setName('Provider quota')
       .setDesc('Fetch the latest provider-reported limits for this account.')

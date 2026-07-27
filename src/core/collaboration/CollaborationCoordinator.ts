@@ -39,7 +39,11 @@ export interface SendCollaborationTurnOptions {
   ) => Promise<string> | string;
   eventMetadata?: Pick<
     CollaborationEvent,
-    'deliberationId' | 'deliberationPhase' | 'workflow'
+    | 'deliberationId'
+    | 'deliberationPhase'
+    | 'workflow'
+    | 'effectiveRoute'
+    | 'roundTableCycle'
   >;
   eventAuthorId?: CollaborationEvent['authorId'];
   eventKind?: CollaborationEvent['kind'];
@@ -94,9 +98,12 @@ export class CollaborationCoordinator {
     room: CollaborationRoom,
     options: SendCollaborationTurnOptions,
   ): Promise<CollaborationTurn> {
-    const recipients = room.participants.filter(participant => (
-      options.recipientIds.includes(getCollaborationParticipantId(participant))
-    ));
+    const recipients = options.recipientIds.flatMap((participantId) => {
+      const participant = room.participants.find(candidate => (
+        getCollaborationParticipantId(candidate) === participantId
+      ));
+      return participant ? [participant] : [];
+    });
     const event: CollaborationEvent = {
       id: this.generateId(),
       kind: options.eventKind ?? 'message',

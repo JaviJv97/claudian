@@ -154,6 +154,30 @@ describe('CollaborationCoordinator', () => {
     ]);
   });
 
+  it('honors explicit recipient order for a sequential pass', async () => {
+    const room = createRoom();
+    const storage = createStorage(room);
+    const order: string[] = [];
+    const coordinator = new CollaborationCoordinator({
+      storage,
+      generateId: () => 'event-ordered',
+      now: () => 10,
+    });
+    const turn = await coordinator.send(room, {
+      content: 'Discuss',
+      recipientIds: ['codex', 'claude'],
+      strategy: 'sequential',
+      dispatch: async participant => {
+        order.push(participant.providerId);
+        return {};
+      },
+    });
+    await turn.completion;
+
+    expect(order).toEqual(['codex', 'claude']);
+    expect(turn.event.recipientIds).toEqual(['codex', 'claude']);
+  });
+
   it('keeps later sequential recipients pending until their turn begins', async () => {
     const room = createRoom();
     const storage = createStorage(room);

@@ -41,6 +41,16 @@ export function resolveCollaborationRecipients(
   return mentioned.length > 0 ? mentioned : [...participantIds];
 }
 
+export function hasExplicitCollaborationRecipient(
+  message: string,
+  participantIds: readonly string[],
+): boolean {
+  if (/(^|\s)@all\b/i.test(message)) return true;
+  return participantIds.some(participantId => (
+    new RegExp(`(^|\\s)@${escapeRegExp(participantId)}\\b`, 'i').test(message)
+  ));
+}
+
 export function resolveCollaborationTurn(
   message: string,
   participantIds: readonly string[],

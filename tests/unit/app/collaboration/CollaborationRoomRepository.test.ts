@@ -364,6 +364,7 @@ describe('CollaborationRoomRepository', () => {
     );
 
     expect(room.discussionMode).toBe('round-table');
+    expect(room.routing?.selection).toBe('manual');
     expect(room.participantLastSeenEventIds).toEqual({ claude: 'event-2' });
     expect(room.updatedAt).toBe(120);
   });
@@ -391,6 +392,86 @@ describe('CollaborationRoomRepository', () => {
       weeklyUsagePercent: 96,
     });
     expect(room.updatedAt).toBe(110);
+  });
+
+  it('persists normalized routing settings without changing roster order', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [
+        { id: 'a', providerId: 'claude', conversationId: 'conversation-a' },
+        { id: 'b', providerId: 'codex', conversationId: 'conversation-b' },
+      ],
+      now: 100,
+    });
+
+    const room = await repository.updateRoutingSettings('room-1', {
+      selection: 'auto',
+      defaultMode: 'round-table',
+      roundTable: {
+        participantOrder: ['b', 'missing'],
+        startingParticipantId: 'b',
+        cycles: 2,
+        rotateStarter: true,
+      },
+      synthesizerParticipantId: 'b',
+    }, 110);
+
+    expect(room.participants.map(participant => participant.id)).toEqual(['a', 'b']);
+    expect(room.routing).toEqual({
+      selection: 'auto',
+      defaultMode: 'round-table',
+      roundTable: {
+        participantOrder: ['b', 'a'],
+        startingParticipantId: 'b',
+        cycles: 2,
+        rotateStarter: true,
+      },
+      synthesizerParticipantId: 'b',
+    });
+  });
+
+  it('repairs routing references when a participant is replaced', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [
+        { id: 'a', providerId: 'claude', conversationId: 'conversation-a' },
+        { id: 'b', providerId: 'codex', conversationId: 'conversation-b' },
+      ],
+      now: 100,
+    });
+    await repository.updateRoutingSettings('room-1', {
+      selection: 'manual',
+      defaultMode: 'round-table',
+      roundTable: {
+        participantOrder: ['b', 'a'],
+        startingParticipantId: 'b',
+        cycles: 2,
+        rotateStarter: false,
+      },
+      facilitatorParticipantId: 'b',
+      synthesizerParticipantId: 'b',
+    }, 105);
+
+    const room = await repository.replaceParticipant(
+      'room-1',
+      'b',
+      { id: 'c', providerId: 'codex', conversationId: 'conversation-c' },
+      110,
+    );
+
+    expect(room.routing).toEqual({
+      selection: 'manual',
+      defaultMode: 'round-table',
+      roundTable: {
+        participantOrder: ['a', 'c'],
+        cycles: 2,
+        rotateStarter: false,
+      },
+    });
   });
 
   it.each(['', '../escape', 'nested/room', '/absolute'])(

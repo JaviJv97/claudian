@@ -1,4 +1,5 @@
 import { getCollaborationParticipantId } from '../../core/collaboration/collaborationRoom';
+import { normalizeCollaborationRoutingSettings } from '../../core/collaboration/collaborationRouting';
 import type { VaultFileAdapter } from '../../core/storage/VaultFileAdapter';
 import type {
   CollaborationDelivery,
@@ -6,6 +7,7 @@ import type {
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
+  CollaborationRoutingSettings,
   CollaborationWorkQueue,
 } from '../../core/types';
 
@@ -31,6 +33,15 @@ function assertRoomId(id: string): void {
   }
 }
 
+function normalizeRoomRouting(room: CollaborationRoom): CollaborationRoom {
+  room.routing = normalizeCollaborationRoutingSettings(
+    room.routing,
+    room.participants.map(getCollaborationParticipantId),
+    room.discussionMode ?? 'parallel',
+  );
+  return room;
+}
+
 export class CollaborationRoomRepository {
   private queues = new Map<string, Promise<unknown>>();
 
@@ -45,6 +56,11 @@ export class CollaborationRoomRepository {
       title: options.title,
       status: 'active',
       discussionMode: 'round-table',
+      routing: normalizeCollaborationRoutingSettings(
+        undefined,
+        options.participants.map(getCollaborationParticipantId),
+        'round-table',
+      ),
       participantLastSeenEventIds: {},
       createdAt: now,
       updatedAt: now,
@@ -64,13 +80,13 @@ export class CollaborationRoomRepository {
     if (new Set(participantIds).size !== participantIds.length) {
       throw new Error('Collaboration room contains duplicate participants');
     }
-    const restored: CollaborationRoom = {
+    const restored = normalizeRoomRouting({
       ...structuredClone(room),
       version: 1,
       status: 'active',
       archivedAt: undefined,
       participantLastSeenEventIds: {},
-    };
+    });
     await this.write(restored);
     return restored;
   }
@@ -81,7 +97,9 @@ export class CollaborationRoomRepository {
     if (!(await this.adapter.exists(path))) return null;
     try {
       const parsed = JSON.parse(await this.adapter.read(path)) as CollaborationRoom;
-      return parsed.version === 1 && parsed.id === id ? parsed : null;
+      return parsed.version === 1 && parsed.id === id
+        ? normalizeRoomRouting(parsed)
+        : null;
     } catch {
       return null;
     }
@@ -94,7 +112,9 @@ export class CollaborationRoomRepository {
       .map(async (candidate) => {
         try {
           const parsed = JSON.parse(await this.adapter.read(candidate)) as CollaborationRoom;
-          return parsed.version === 1 && SAFE_ROOM_ID_PATTERN.test(parsed.id) ? parsed : null;
+          return parsed.version === 1 && SAFE_ROOM_ID_PATTERN.test(parsed.id)
+            ? normalizeRoomRouting(parsed)
+            : null;
         } catch {
           return null;
         }
@@ -176,6 +196,11 @@ export class CollaborationRoomRepository {
         throw new Error(`Collaboration participant already exists: ${replacementId}`);
       }
       room.participants[index] = { ...replacement };
+      room.routing = normalizeCollaborationRoutingSettings(
+        room.routing,
+        room.participants.map(getCollaborationParticipantId),
+        room.discussionMode ?? 'parallel',
+      );
       room.updatedAt = Math.max(room.updatedAt, now);
       return room;
     });
@@ -188,6 +213,28 @@ export class CollaborationRoomRepository {
   ): Promise<CollaborationRoom> {
     return this.mutate(roomId, (room) => {
       room.discussionMode = mode;
+      room.routing = normalizeCollaborationRoutingSettings({
+        ...room.routing,
+        selection: 'manual',
+        defaultMode: mode,
+      }, room.participants.map(getCollaborationParticipantId), mode);
+      room.updatedAt = Math.max(room.updatedAt, now);
+      return room;
+    });
+  }
+
+  async updateRoutingSettings(
+    roomId: string,
+    settings: CollaborationRoutingSettings,
+    now = Date.now(),
+  ): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      room.routing = normalizeCollaborationRoutingSettings(
+        settings,
+        room.participants.map(getCollaborationParticipantId),
+        room.discussionMode ?? 'parallel',
+      );
+      room.discussionMode = room.routing.defaultMode;
       room.updatedAt = Math.max(room.updatedAt, now);
       return room;
     });

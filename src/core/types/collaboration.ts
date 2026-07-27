@@ -16,6 +16,33 @@ export type CollaborationDiscussionMode =
   | 'round-table'
   | 'deliberation'
   | 'mentioned-only';
+export type CollaborationRouteSource = 'explicit' | 'deterministic' | 'default';
+
+export interface CollaborationRoutingSettings {
+  selection: 'manual' | 'auto';
+  defaultMode: CollaborationDiscussionMode;
+  roundTable: {
+    participantOrder: string[];
+    startingParticipantId?: string;
+    cycles: number;
+    rotateStarter: boolean;
+  };
+  facilitatorParticipantId?: string;
+  synthesizerParticipantId?: string;
+}
+
+export interface CollaborationEffectiveRoute {
+  mode: CollaborationDiscussionMode;
+  source: CollaborationRouteSource;
+  recipientIds: string[];
+  orderedParticipantIds: string[];
+  cycleOrders: string[][];
+  cycles: number;
+  facilitatorParticipantId?: string;
+  synthesizerParticipantId?: string;
+  reasons: string[];
+  warnings: string[];
+}
 export type CollaborationDeliberationPhase =
   | 'position'
   | 'critique'
@@ -135,7 +162,7 @@ export interface CollaborationParticipant {
 }
 
 export interface CollaborationParticipantResourcePolicy {
-  mode: 'active' | 'preserve' | 'unavailable';
+  mode: 'active' | 'preserve' | 'muted' | 'unavailable';
   /** Manual fallback used when a provider snapshot is unavailable. */
   weeklyUsagePercent?: number;
   /** Last provider-reported account snapshot. Safe to persist; contains no credentials. */
@@ -204,6 +231,13 @@ export interface CollaborationEvent {
   workflow?: CollaborationWorkflowMetadata;
   workflowDecision?: 'approved' | 'changes-requested';
   resourceUsage?: CollaborationResourceUsageSnapshot[];
+  /** Immutable routing decision used for this turn. */
+  effectiveRoute?: CollaborationEffectiveRoute;
+  roundTableCycle?: {
+    id: string;
+    index: number;
+    total: number;
+  };
 }
 
 export interface CollaborationRoom {
@@ -215,6 +249,7 @@ export interface CollaborationRoom {
   archivedAt?: number;
   /** Legacy rooms default to parallel delivery. */
   discussionMode?: CollaborationDiscussionMode;
+  routing?: CollaborationRoutingSettings;
   /** Last durable room event included in each participant's model context. */
   participantLastSeenEventIds?: Record<string, string>;
   createdAt: number;

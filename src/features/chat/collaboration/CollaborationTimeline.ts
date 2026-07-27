@@ -1,10 +1,15 @@
 import type { Component } from 'obsidian';
-import { MarkdownRenderer, setIcon } from 'obsidian';
+import { MarkdownRenderer, Menu, setIcon } from 'obsidian';
 
 import {
   getQuotaRoutingRecommendation,
   isQuotaSnapshotStale,
 } from '../../../core/collaboration/collaborationResourcePolicy';
+import {
+  hasExplicitCollaborationRecipient,
+  resolveCollaborationTurn,
+} from '../../../core/collaboration/collaborationRoom';
+import { resolveCollaborationEffectiveRoute } from '../../../core/collaboration/collaborationRouting';
 import {
   getRecommendedCollaborationWorkTask,
   validateCollaborationWorkQueue,
@@ -13,10 +18,12 @@ import type {
   CollaborationDeliberationPhase,
   CollaborationDeliveryStatus,
   CollaborationDiscussionMode,
+  CollaborationEffectiveRoute,
   CollaborationEvent,
   CollaborationParticipantResourcePolicy,
   CollaborationResourceUsageSnapshot,
   CollaborationRoom,
+  CollaborationRoutingSettings,
   CollaborationWorkflowPhase,
   CollaborationWorkTask,
   ProviderId,
@@ -38,6 +45,13 @@ interface CollaborationTimelineOptions {
   roomId: string;
   discussionMode: CollaborationDiscussionMode;
   onDiscussionModeChange: (mode: CollaborationDiscussionMode) => Promise<void>;
+  routingSettings: CollaborationRoutingSettings;
+  onEditRoutingSettings: () => void;
+  onQuickResourceModeChange: (
+    participantId: ProviderId,
+    mode: CollaborationParticipantResourcePolicy['mode'],
+  ) => Promise<void>;
+  onApplyQuotaRecommendation: (participantId: ProviderId) => Promise<void>;
   canStop: (providerId: ProviderId) => boolean;
   onStop: (providerId: ProviderId) => void;
   onRetry: (providerId: ProviderId, content: string) => Promise<void>;
@@ -85,7 +99,6 @@ interface CollaborationTimelineOptions {
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
   onRequestWorkflowChanges: (workflowId: string, deliberationId: string) => Promise<void>;
   onEditResourcePolicy: (participantId: ProviderId) => void;
-  onApplyQuotaRecommendation: (participantId: ProviderId) => Promise<void>;
   onOpenUsageDashboard: () => void;
   onReview: (
     reviewerId: ProviderId,
@@ -116,7 +129,21 @@ export function getAvailableReviewParticipantIds(
   return [...new Set(participantIds)].filter(participantId => (
     participantId !== sourceParticipantId
     && resourcePolicies[participantId]?.mode !== 'unavailable'
+    && resourcePolicies[participantId]?.mode !== 'muted'
   ));
+}
+
+export function formatCollaborationRoutePreview(route: CollaborationEffectiveRoute): string {
+  const turns = route.mode === 'deliberation'
+    ? route.recipientIds.length * 3 + 1
+    : route.mode === 'round-table'
+      ? route.recipientIds.length * route.cycles
+      : route.recipientIds.length;
+  return `Estimate · ${route.source === 'deterministic' ? 'Auto' : 'Route'} → ${
+    route.mode
+  } · ${route.recipientIds.length} agent${
+    route.recipientIds.length === 1 ? '' : 's'
+  } · ${turns} projected turn${turns === 1 ? '' : 's'}`;
 }
 
 type CollaborationActivityPhase =
@@ -162,6 +189,7 @@ export class CollaborationTimeline {
   private readonly rootEl: HTMLElement;
   private readonly timelineEl: HTMLElement;
   private readonly recoveryEl: HTMLElement;
+  private readonly routePreviewEl: HTMLElement;
   private readonly statusEls = new Map<ProviderId, HTMLElement>();
   private readonly stopEls = new Map<ProviderId, HTMLButtonElement>();
   private readonly resourceEls = new Map<ProviderId, HTMLButtonElement>();
@@ -203,6 +231,13 @@ export class CollaborationTimeline {
       },
     });
     this.buildParticipantRail(controlsEl);
+    this.routePreviewEl = controlsEl.createDiv({
+      cls: 'claudian-collaboration-route-preview claudian-hidden',
+      attr: {
+        role: 'status',
+        'aria-live': 'polite',
+      },
+    });
 
     for (const tab of options.participantTabs) {
       this.cleanups.push(tab.state.subscribe({
@@ -211,12 +246,16 @@ export class CollaborationTimeline {
         onAttentionChanged: () => this.scheduleRender(),
       }));
     }
-    const syncRecipientSelection = () => this.syncRecipientSelection();
+    const syncRecipientSelection = () => {
+      this.syncRecipientSelection();
+      this.updateRoutePreview();
+    };
     options.hostTab.dom.inputEl.addEventListener('input', syncRecipientSelection);
     this.cleanups.push(() => (
       options.hostTab.dom.inputEl.removeEventListener('input', syncRecipientSelection)
     ));
     this.scheduleRender();
+    this.updateRoutePreview();
   }
 
   refresh(): void {
@@ -237,9 +276,9 @@ export class CollaborationTimeline {
     });
     rosterEl.createSpan({
       cls: 'claudian-collaboration-roster-label',
-      text: 'In this room',
+      text: 'Room',
     });
-    rosterEl.createSpan({
+    const rosterMembers = rosterEl.createSpan({
       cls: 'claudian-collaboration-roster-members',
       text: participantIds.map(id => this.getParticipantLabel(id)).join(' · '),
     });
@@ -313,6 +352,27 @@ export class CollaborationTimeline {
           .finally(() => { button.disabled = false; });
       });
     }
+    const routingButton = modeEl.createEl('button', {
+      cls: 'claudian-collaboration-routing-button',
+      text: this.options.routingSettings.selection === 'auto'
+        ? `Auto · ${this.options.routingSettings.roundTable.cycles} cycle${
+          this.options.routingSettings.roundTable.cycles === 1 ? '' : 's'
+        }`
+        : `Configure · ${this.options.routingSettings.roundTable.cycles} cycle${
+          this.options.routingSettings.roundTable.cycles === 1 ? '' : 's'
+        }`,
+      attr: {
+        type: 'button',
+        'aria-label': 'Configure collaboration routing',
+        'data-selection': this.options.routingSettings.selection,
+      },
+    });
+    rosterMembers.setText(`${participantIds.length} agent${participantIds.length === 1 ? '' : 's'}`);
+    rosterMembers.setAttribute(
+      'title',
+      participantIds.map(id => this.getParticipantLabel(id)).join(' · '),
+    );
+    routingButton.addEventListener('click', () => this.options.onEditRoutingSettings());
 
     const recommendations = participantIds.flatMap((participantId) => {
       const recommendation = getQuotaRoutingRecommendation(
@@ -377,7 +437,14 @@ export class CollaborationTimeline {
     allButton.addEventListener('click', () => this.selectRecipient('all', allButton));
 
     for (const participantId of participantIds) {
-      const button = railEl.createEl('button', {
+      const participantControl = railEl.createDiv({
+        cls: 'claudian-collaboration-participant-control',
+        attr: {
+          'data-provider': participantId,
+          'data-identity': String(this.getParticipantIdentityIndex(participantId)),
+        },
+      });
+      const button = participantControl.createEl('button', {
         cls: 'claudian-collaboration-recipient',
         text: this.getParticipantLabel(participantId),
         attr: {
@@ -393,7 +460,7 @@ export class CollaborationTimeline {
       this.statusEls.set(participantId, statusEl);
       button.addEventListener('click', () => this.selectRecipient(participantId, button));
 
-      const stopButton = railEl.createEl('button', {
+      const stopButton = participantControl.createEl('button', {
         cls: 'claudian-collaboration-stop',
         attr: {
           type: 'button',
@@ -406,18 +473,48 @@ export class CollaborationTimeline {
       this.stopEls.set(participantId, stopButton);
 
       const policy = this.options.participantResourcePolicies[participantId];
-      const resourceButton = railEl.createEl('button', {
+      const resourceButton = participantControl.createEl('button', {
         cls: 'claudian-collaboration-resource',
         text: this.getResourceLabel(policy),
         attr: {
           type: 'button',
-          'aria-label': `Edit usage policy for ${this.getParticipantLabel(participantId)}`,
+          'aria-label': `${
+            this.getParticipantLabel(participantId)
+          } routing state: ${policy?.mode ?? 'active'}. Click to choose a state or view details.`,
           'data-provider': participantId,
         },
       });
-      resourceButton.addEventListener('click', () => (
-        this.options.onEditResourcePolicy(participantId)
-      ));
+      resourceButton.addEventListener('click', (event) => {
+        const current = policy?.mode ?? 'active';
+        if (current === 'unavailable') {
+          this.options.onEditResourcePolicy(participantId);
+          return;
+        }
+        const menu = new Menu();
+        const modes: Array<{
+          mode: 'active' | 'preserve' | 'muted';
+          label: string;
+          icon: string;
+        }> = [
+          { mode: 'active', label: 'Active', icon: 'circle-check' },
+          { mode: 'preserve', label: 'Preserve', icon: 'shield' },
+          { mode: 'muted', label: 'Muted', icon: 'volume-x' },
+        ];
+        for (const option of modes) {
+          menu.addItem(item => item
+            .setTitle(`${current === option.mode ? '✓ ' : ''}${option.label}`)
+            .setIcon(option.icon)
+            .onClick(() => {
+              if (current === option.mode) return;
+              void this.options.onQuickResourceModeChange(participantId, option.mode);
+            }));
+        }
+        menu.addItem(item => item
+          .setTitle('Usage details')
+          .setIcon('gauge')
+          .onClick(() => this.options.onEditResourcePolicy(participantId)));
+        menu.showAtMouseEvent(event);
+      });
       this.resourceEls.set(participantId, resourceButton);
     }
   }
@@ -440,6 +537,34 @@ export class CollaborationTimeline {
     const EventConstructor = inputEl.ownerDocument.defaultView?.Event ?? Event;
     inputEl.dispatchEvent(new EventConstructor('input', { bubbles: true }));
     inputEl.focus();
+    this.updateRoutePreview();
+  }
+
+  private updateRoutePreview(): void {
+    const content = this.options.hostTab.dom.inputEl.value.trim();
+    this.routePreviewEl.toggleClass('claudian-hidden', content.length === 0);
+    if (!content) return;
+    const participantIds = Object.keys(this.options.participantLabels);
+    const eligibleParticipantIds = participantIds.filter((participantId) => {
+      const mode = this.options.participantResourcePolicies[participantId]?.mode ?? 'active';
+      if (mode === 'muted' || mode === 'unavailable') return false;
+      return mode === 'active'
+        || new RegExp(`(^|\\s)@${escapeRegExp(participantId)}\\b`, 'i').test(content);
+    });
+    const turn = resolveCollaborationTurn(content, eligibleParticipantIds);
+    const route = resolveCollaborationEffectiveRoute({
+      content: turn.content,
+      explicitRecipientIds: turn.recipientIds,
+      explicitRecipients: hasExplicitCollaborationRecipient(content, eligibleParticipantIds),
+      eligibleParticipantIds,
+      sharedReferencedFiles: [],
+      settings: this.options.routingSettings,
+    });
+    this.routePreviewEl.setText(formatCollaborationRoutePreview(route));
+    this.routePreviewEl.setAttribute(
+      'title',
+      [...route.reasons, ...route.warnings].join(' ') || 'Estimated route',
+    );
   }
 
   private scheduleRender(): void {
@@ -510,6 +635,10 @@ export class CollaborationTimeline {
       });
       const authorLabel = event.authorId === 'user'
           ? 'You'
+          : event.authorId === 'system' && event.roundTableCycle
+            ? `Round table · cycle ${
+              event.roundTableCycle.index
+            }/${event.roundTableCycle.total}`
           : event.authorId === 'system' && event.deliberationPhase
             ? `Deliberation · ${event.deliberationPhase}`
             : event.authorId === 'system' && event.workflow
@@ -546,6 +675,23 @@ export class CollaborationTimeline {
         }
       } else {
         authorEl.setText(authorLabel);
+      }
+      if (event.effectiveRoute) {
+        const route = event.effectiveRoute;
+        const detail = route.mode === 'round-table'
+          ? `${route.orderedParticipantIds
+            .map(id => this.getParticipantLabel(id))
+            .join(' → ')} · ${route.cycles} cycle${route.cycles === 1 ? '' : 's'}`
+          : `${route.recipientIds.length} recipient${route.recipientIds.length === 1 ? '' : 's'}`;
+        messageEl.createDiv({
+          cls: 'claudian-collaboration-route-summary',
+          text: `${route.source === 'deterministic' ? 'Auto' : 'Route'} · ${
+            route.mode
+          } · ${detail}`,
+          attr: {
+            title: [...route.reasons, ...route.warnings].join(' ') || 'Effective route',
+          },
+        });
       }
       const contentEl = messageEl.createDiv({
         cls: 'claudian-collaboration-content',
@@ -875,18 +1021,25 @@ export class CollaborationTimeline {
       top.createSpan({ cls: 'claudian-collaboration-work-task-id', text: task.id });
       top.createSpan({ cls: 'claudian-collaboration-work-task-status', text: task.status });
       item.createDiv({ cls: 'claudian-collaboration-work-task-title', text: task.title });
+      const resourceNotices = [
+        [task.ownerId, 'owner'],
+        [task.reviewerId, 'reviewer'],
+      ].flatMap(([participantId, role]) => {
+        const mode = this.options.participantResourcePolicies[participantId]?.mode;
+        return mode && mode !== 'active' ? [`${role} ${mode}`] : [];
+      });
+      const ownerWeeklyUsage = this.options
+        .participantResourcePolicies[task.ownerId]?.weeklyUsagePercent;
       item.createDiv({
         cls: 'claudian-collaboration-work-task-meta',
         text: `${this.getParticipantLabel(task.ownerId)} → ${
           this.getParticipantLabel(task.reviewerId)
         } · ${task.fileScopes.join(', ')}${
-          this.options.participantResourcePolicies[task.ownerId]?.mode === 'preserve'
-            ? ' · owner preserved'
-            : this.options.participantResourcePolicies[task.ownerId]?.weeklyUsagePercent !== undefined
-              ? ` · owner ${
-                this.options.participantResourcePolicies[task.ownerId]?.weeklyUsagePercent
-              }% week`
-              : ''
+          resourceNotices.length > 0
+            ? ` · ${resourceNotices.join(' · ')}`
+            : ownerWeeklyUsage !== undefined
+              ? ` · owner ${ownerWeeklyUsage}% week`
+            : ''
         }`,
       });
       if (queue.status === 'draft') {
@@ -906,6 +1059,8 @@ export class CollaborationTimeline {
               text: `${this.getParticipantLabel(participantId)}${
                 this.options.participantResourcePolicies[participantId]?.mode === 'preserve'
                   ? ' (preserve)'
+                  : this.options.participantResourcePolicies[participantId]?.mode === 'muted'
+                    ? ' (muted)'
                   : this.options.participantResourcePolicies[participantId]?.mode === 'unavailable'
                     ? ' (unavailable)'
                     : this.options.participantResourcePolicies[participantId]
@@ -921,6 +1076,7 @@ export class CollaborationTimeline {
             option.selected = participantId === selectedId;
             option.disabled = (
               this.options.participantResourcePolicies[participantId]?.mode === 'unavailable'
+              || this.options.participantResourcePolicies[participantId]?.mode === 'muted'
             );
           }
           return select;
@@ -1187,6 +1343,7 @@ export class CollaborationTimeline {
         queue,
         Object.keys(this.options.participantLabels).filter(participantId => (
           this.options.participantResourcePolicies[participantId]?.mode !== 'unavailable'
+          && this.options.participantResourcePolicies[participantId]?.mode !== 'muted'
         )),
       );
       if (validationErrors.length > 0) {
@@ -1588,6 +1745,7 @@ export class CollaborationTimeline {
     const labeled = policy?.quotaSnapshot && isQuotaSnapshotStale(policy.quotaSnapshot)
       ? `${usage} · stale`
       : usage;
+    if (policy?.mode === 'muted') return `${labeled} · muted`;
     return policy?.mode === 'preserve'
       ? `${labeled} · preserve`
       : policy?.mode === 'unavailable'

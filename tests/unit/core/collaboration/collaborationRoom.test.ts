@@ -1,6 +1,7 @@
 import {
   createCollaborationMemberships,
   getCollaborationParticipantId,
+  hasExplicitCollaborationRecipient,
   resolveCollaborationRecipients,
   resolveCollaborationTurn,
 } from '@/core/collaboration/collaborationRoom';
@@ -48,6 +49,21 @@ describe('collaboration rooms', () => {
       'The @claudette example is unrelated',
       ['claude', 'codex'],
     )).toEqual(['claude', 'codex']);
+  });
+
+  it('recognizes only actual room recipients as explicit mentions', () => {
+    expect(hasExplicitCollaborationRecipient(
+      'Please ask @claude',
+      ['claude', 'codex'],
+    )).toBe(true);
+    expect(hasExplicitCollaborationRecipient(
+      'Please ask @all',
+      ['claude', 'codex'],
+    )).toBe(true);
+    expect(hasExplicitCollaborationRecipient(
+      'This note mentions @outsider, who is not an agent',
+      ['claude', 'codex'],
+    )).toBe(false);
   });
 
   it.each([

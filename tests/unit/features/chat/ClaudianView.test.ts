@@ -317,6 +317,29 @@ describe('ClaudianView collaboration quota refresh', () => {
 });
 
 describe('ClaudianView collaboration turn queue', () => {
+  it('holds a follow-up across round-table cycle boundaries', async () => {
+    const view = Object.create(ClaudianView.prototype) as any;
+    view.activeCollaborationDeliveries = new Map();
+    view.activeCollaborationRoundTables = new Set(['room-1']);
+    view.queuedCollaborationMessages = new Map();
+    view.routeCollaborationMessage = jest.fn().mockResolvedValue(true);
+    view.queueCollaborationMessage('room-1', {
+      originTabId: 'tab-1',
+      content: 'Wait for the next cycle',
+    });
+
+    await view.drainNextCollaborationMessage('room-1');
+    expect(view.routeCollaborationMessage).not.toHaveBeenCalled();
+
+    view.activeCollaborationRoundTables.clear();
+    await view.drainNextCollaborationMessage('room-1');
+    expect(view.routeCollaborationMessage).toHaveBeenCalledWith(
+      'tab-1',
+      'Wait for the next cycle',
+      undefined,
+    );
+  });
+
   it('holds a follow-up until every active room delivery finishes', async () => {
     const view = Object.create(ClaudianView.prototype) as any;
     view.activeCollaborationDeliveries = new Map([

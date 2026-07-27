@@ -70,7 +70,7 @@
 .claudian-collaboration-modes {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -81,12 +81,36 @@
   background: var(--background-secondary);
 }
 
+.claudian-collaboration-routing-button {
+  min-width: 0;
+  min-height: 28px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claudian-collaboration-routing-button:hover,
+.claudian-collaboration-routing-button:focus-visible {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.claudian-collaboration-routing-button[data-selection="auto"] {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
 .claudian-collaboration-quota-recommendation {
   display: flex;
-  min-height: 36px;
+  min-height: 30px;
   align-items: center;
   gap: 10px;
-  padding: 5px 10px;
+  padding: 3px 8px;
   border-top: 1px solid var(--background-modifier-border);
   border-bottom: 1px solid var(--background-modifier-border);
   background: rgba(var(--color-yellow-rgb), 0.08);
@@ -95,7 +119,11 @@
 }
 
 .claudian-collaboration-quota-recommendation > span {
+  min-width: 0;
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .claudian-collaboration-quota-recommendation button {
@@ -166,6 +194,13 @@
   color: var(--text-warning);
 }
 
+.claudian-collaboration-resource[data-mode="muted"] {
+  border-color: var(--text-faint);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
 .claudian-collaboration-resource[data-mode="unavailable"] {
   border-color: var(--background-modifier-border);
   color: var(--text-error);
@@ -180,6 +215,49 @@
   border-color: var(--background-modifier-border-hover);
   background: var(--background-modifier-hover);
   color: var(--text-normal);
+}
+
+.claudian-collaboration-routing-order {
+  margin-block: var(--size-4-4);
+  padding: var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.claudian-collaboration-routing-modal {
+  --dialog-width: min(560px, calc(100vw - 32px));
+}
+
+.claudian-collaboration-routing-order h3 {
+  margin: 0 0 var(--size-4-2);
+  font-size: var(--font-ui-small);
+}
+
+.claudian-collaboration-route-summary {
+  width: fit-content;
+  max-width: 100%;
+  margin: 2px 0 6px;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claudian-collaboration-route-preview {
+  min-width: 0;
+  padding: 5px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: rgba(var(--interactive-accent-rgb), 0.08);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .claudian-collaboration-recipient {
@@ -857,7 +935,8 @@
   }
 
   .claudian-collaboration-modes {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(96px, 1fr));
+    overflow-x: auto;
   }
 
   .claudian-collaboration-rail {
@@ -913,12 +992,11 @@
   }
 
   .claudian-collaboration-quota-recommendation {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 6px;
+    align-items: center;
+    flex-direction: row;
+    gap: 4px;
   }
 
-  .claudian-collaboration-quota-recommendation button,
   .claudian-collaboration-recovery-actions {
     width: 100%;
   }
@@ -942,6 +1020,36 @@
   }
 }
 
+.claudian-collaboration-participant-control {
+  display: inline-grid;
+  min-width: 0;
+  flex: 1 1 150px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.claudian-collaboration-participant-control > .claudian-collaboration-recipient,
+.claudian-collaboration-participant-control > .claudian-collaboration-resource,
+.claudian-collaboration-participant-control > .claudian-collaboration-stop {
+  border-radius: 0;
+}
+
+.claudian-collaboration-participant-control > .claudian-collaboration-recipient {
+  border-start-start-radius: var(--radius-s);
+  border-end-start-radius: var(--radius-s);
+}
+
+.claudian-collaboration-participant-control > .claudian-collaboration-resource {
+  max-width: 92px;
+  overflow: hidden;
+  border-inline-start: 1px solid var(--background-modifier-border);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @container claudian-collaboration (max-width: 340px) {
   .claudian-collaboration-roster {
     grid-template-columns: minmax(0, 1fr);
@@ -952,10 +1060,10 @@
   }
 
   .claudian-collaboration-modes {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(5, minmax(92px, 1fr));
   }
 
-  .claudian-collaboration-recipient {
+  .claudian-collaboration-participant-control {
     flex-basis: 100%;
   }
 }
