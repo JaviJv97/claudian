@@ -232,6 +232,7 @@
 
 .claudian-collaboration-recovery {
   display: flex;
+  flex-wrap: wrap;
   min-height: 44px;
   align-items: center;
   justify-content: space-between;
@@ -249,7 +250,131 @@
 .claudian-collaboration-recovery-actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
+}
+
+.claudian-collaboration-proposal {
+  flex: 1 0 100%;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+}
+
+.claudian-collaboration-proposal > summary {
+  min-height: 36px;
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+}
+
+.claudian-collaboration-proposal > summary:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+.claudian-collaboration-proposal-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 10px 10px;
+}
+
+.claudian-collaboration-proposal-file {
+  min-width: 0;
+}
+
+.claudian-collaboration-proposal-file + .claudian-collaboration-proposal-file {
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.claudian-collaboration-proposal-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.claudian-collaboration-proposal-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claudian-collaboration-proposal-time {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.claudian-collaboration-proposal-stats {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.claudian-collaboration-proposal-stats .added {
+  color: var(--text-success);
+}
+
+.claudian-collaboration-proposal-stats .removed {
+  color: var(--text-error);
+}
+
+.claudian-collaboration-proposal-summary {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.claudian-collaboration-proposal-hunk {
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.claudian-collaboration-proposal-hunk-label {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.claudian-collaboration-proposal-hunk-label:focus-within {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+.claudian-collaboration-proposal-diff {
+  max-height: 220px;
+  overflow: auto;
+  background: var(--background-primary-alt);
+}
+
+.claudian-collaboration-proposal-legacy {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }
 
 .claudian-collaboration-retry {

@@ -33,13 +33,16 @@ describe('collaborationFileConflicts', () => {
       before,
       after,
       'codex',
+      'Updated the shared section.',
       100,
     )).toEqual([{
       path: 'Shared.md',
       participantId: 'codex',
       baseRevision: '10:20',
       currentRevision: '11:24',
+      acceptedContent: 'accepted first edit',
       proposedContent: 'stale second edit',
+      summary: 'Updated the shared section.',
       createdAt: 100,
     }]);
   });

@@ -42,6 +42,10 @@ import {
   findSharedReferencedFiles,
   findStaleFileProposals,
 } from './collaboration/collaborationFileConflicts';
+import {
+  applyCollaborationProposalHunks,
+  createCollaborationProposalReview,
+} from './collaboration/collaborationProposalReview';
 import { findCollaborationRebindCandidates } from './collaboration/collaborationRebinding';
 import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
 import {
@@ -974,6 +978,7 @@ export class ClaudianView extends ItemView {
           participantFileState,
           proposedFileState,
           participantId,
+          assistantMessage?.content,
         );
         for (const proposal of fileProposals) {
           const accepted = participantFileState.get(proposal.path);
@@ -1241,6 +1246,10 @@ export class ClaudianView extends ItemView {
           },
           onKeepCurrent: async (eventId) => {
             await this.resolveCollaborationConflict(roomId, eventId, 'kept-current');
+            await this.appendCollaborationWorkspaceEvent(
+              roomId,
+              'Kept the current workspace state. Pending edit proposals were dismissed.',
+            );
           },
           onResolve: async (eventId, providerId, content, conflictFiles) => {
             const fileList = conflictFiles.join(', ');
@@ -1258,7 +1267,7 @@ export class ClaudianView extends ItemView {
               providerId,
             );
           },
-          onApplyProposal: async (eventId, providerId) => {
+          onApplyProposal: async (eventId, providerId, selectedHunks) => {
             const currentRoom = await this.plugin.storage.rooms.get(roomId);
             const delivery = currentRoom?.events
               .find(event => event.id === eventId)
@@ -1267,6 +1276,7 @@ export class ClaudianView extends ItemView {
               throw new Error('File proposal not found');
             }
             for (const proposal of delivery.fileProposals) {
+              if ((selectedHunks[proposal.path]?.length ?? 0) === 0) continue;
               const currentContent = await this.plugin.app.vault.adapter.read(proposal.path);
               const currentStat = await this.plugin.app.vault.adapter.stat(proposal.path);
               const currentRevision = createCollaborationFileRevision(
@@ -1279,12 +1289,34 @@ export class ClaudianView extends ItemView {
                 return;
               }
             }
+            const applied: string[] = [];
             for (const proposal of delivery.fileProposals) {
+              const selected = new Set(selectedHunks[proposal.path] ?? []);
+              if (selected.size === 0) continue;
+              const acceptedContent = proposal.acceptedContent;
+              const review = acceptedContent === undefined ? null
+                : createCollaborationProposalReview(
+                  acceptedContent,
+                  proposal.proposedContent,
+                );
+              const nextContent = acceptedContent === undefined || review === null
+                ? proposal.proposedContent
+                : applyCollaborationProposalHunks(
+                  acceptedContent,
+                  review.hunks,
+                  selected,
+                );
               await this.plugin.app.vault.adapter.write(
                 proposal.path,
-                proposal.proposedContent,
+                nextContent,
+              );
+              applied.push(
+                review
+                  ? `${proposal.path} (${selected.size} of ${review.hunks.length} changes)`
+                  : `${proposal.path} (whole file)`,
               );
             }
+            if (applied.length === 0) return;
             await this.resolveCollaborationConflict(
               roomId,
               eventId,
@@ -1292,11 +1324,18 @@ export class ClaudianView extends ItemView {
               providerId,
               providerId,
             );
-            new Notice(`${ProviderRegistry.getProviderDisplayName(
-              room.participants.find(participant => (
-                getCollaborationParticipantId(participant) === providerId
-              ))?.providerId ?? providerId,
-            )} proposal applied.`);
+            const proposalParticipant = room.participants.find(participant => (
+              getCollaborationParticipantId(participant) === providerId
+            ));
+            const providerLabel = proposalParticipant?.label
+              ?? ProviderRegistry.getProviderDisplayName(
+                proposalParticipant?.providerId ?? providerId,
+              );
+            await this.appendCollaborationWorkspaceEvent(
+              roomId,
+              `Accepted workspace state from ${providerLabel}: ${applied.join(', ')}.`,
+            );
+            new Notice(`${providerLabel} proposal applied.`);
           },
           onReview: async (reviewerId, sourceProviderId, content) => {
             const sourceParticipant = room.participants.find(participant => (
@@ -1338,6 +1377,22 @@ export class ClaudianView extends ItemView {
         resolutionProviderId,
       });
     }));
+    this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async appendCollaborationWorkspaceEvent(
+    roomId: string,
+    content: string,
+  ): Promise<void> {
+    await this.plugin.storage.rooms.appendEvent(roomId, {
+      id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      kind: 'system',
+      authorId: 'system',
+      recipientIds: ['user'],
+      content,
+      createdAt: Date.now(),
+      delivery: {},
+    });
     this.refreshCollaborationTimelines(roomId);
   }
 

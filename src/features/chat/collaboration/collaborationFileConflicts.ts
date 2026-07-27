@@ -69,13 +69,16 @@ export function findStaleFileProposals(
   before: CollaborationFileContentSnapshot,
   after: CollaborationFileContentSnapshot,
   participantId: string,
+  summary?: string,
   now = Date.now(),
 ): Array<{
   path: string;
   participantId: string;
   baseRevision: string;
   currentRevision: string;
+  acceptedContent: string;
   proposedContent: string;
+  summary?: string;
   createdAt: number;
 }> {
   const proposals = [];
@@ -93,7 +96,9 @@ export function findStaleFileProposals(
       participantId,
       baseRevision: base.revision,
       currentRevision: current.revision,
+      acceptedContent: current.content,
       proposedContent: proposed.content,
+      summary,
       createdAt: now,
     });
   }

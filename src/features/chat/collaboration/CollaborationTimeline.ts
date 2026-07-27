@@ -8,7 +8,9 @@ import type {
   ProviderId,
 } from '../../../core/types';
 import type { FeatureHost } from '../../FeatureHost';
+import { renderDiffContent, renderDiffStats } from '../rendering/DiffRenderer';
 import type { TabData } from '../tabs/types';
+import { createCollaborationProposalReview } from './collaborationProposalReview';
 import { getLatestRetryableDeliveries } from './collaborationRecovery';
 
 interface CollaborationTimelineOptions {
@@ -31,7 +33,11 @@ interface CollaborationTimelineOptions {
     content: string,
     conflictFiles: string[],
   ) => Promise<void>;
-  onApplyProposal: (eventId: string, providerId: ProviderId) => Promise<void>;
+  onApplyProposal: (
+    eventId: string,
+    providerId: ProviderId,
+    selectedHunks: Record<string, string[]>,
+  ) => Promise<void>;
   onReview: (
     reviewerId: ProviderId,
     sourceProviderId: ProviderId,
@@ -453,17 +459,112 @@ export class CollaborationTimeline {
         });
       });
       if (delivery.status === 'conflict' && (delivery.fileProposals?.length ?? 0) > 0) {
+        const selectedHunks: Record<string, Set<string>> = {};
+        const reviewEl = this.recoveryEl.createEl('details', {
+          cls: 'claudian-collaboration-proposal',
+        });
+        reviewEl.createEl('summary', {
+          text: `Review ${this.getParticipantLabel(delivery.providerId)} proposal`,
+        });
+        const proposalBodyEl = reviewEl.createDiv({
+          cls: 'claudian-collaboration-proposal-body',
+        });
+        for (const proposal of delivery.fileProposals ?? []) {
+          const acceptedContent = proposal.acceptedContent;
+          const proposalReview = acceptedContent === undefined
+            ? null
+            : createCollaborationProposalReview(acceptedContent, proposal.proposedContent);
+          const fileEl = proposalBodyEl.createDiv({
+            cls: 'claudian-collaboration-proposal-file',
+          });
+          const headingEl = fileEl.createDiv({
+            cls: 'claudian-collaboration-proposal-heading',
+          });
+          headingEl.createSpan({
+            cls: 'claudian-collaboration-proposal-path',
+            text: proposal.path,
+          });
+          headingEl.createEl('time', {
+            cls: 'claudian-collaboration-proposal-time',
+            text: new Date(proposal.createdAt).toLocaleTimeString([], {
+              hour: 'numeric',
+              minute: '2-digit',
+            }),
+            attr: { datetime: new Date(proposal.createdAt).toISOString() },
+          });
+          if (proposal.summary) {
+            fileEl.createDiv({
+              cls: 'claudian-collaboration-proposal-summary',
+              text: proposal.summary,
+            });
+          }
+          if (!proposalReview) {
+            fileEl.createDiv({
+              cls: 'claudian-collaboration-proposal-legacy',
+              text: 'This earlier proposal can be applied as a whole.',
+            });
+            selectedHunks[proposal.path] = new Set(['legacy-whole-file']);
+            continue;
+          }
+          const statsEl = headingEl.createSpan({
+            cls: 'claudian-collaboration-proposal-stats',
+            attr: { 'aria-label': `${proposalReview.stats.added} lines added, ${
+              proposalReview.stats.removed
+            } lines removed` },
+          });
+          renderDiffStats(statsEl, proposalReview.stats);
+          selectedHunks[proposal.path] = new Set(
+            proposalReview.hunks.map(hunk => hunk.id),
+          );
+          proposalReview.hunks.forEach((hunk, hunkIndex) => {
+            const hunkEl = fileEl.createDiv({
+              cls: 'claudian-collaboration-proposal-hunk',
+            });
+            const hunkId = `${delivery.eventId}-${delivery.providerId}-${
+              proposal.path
+            }-${hunk.id}`.replace(/[^A-Za-z0-9_-]/g, '-');
+            const labelEl = hunkEl.createEl('label', {
+              cls: 'claudian-collaboration-proposal-hunk-label',
+              attr: { for: hunkId },
+            });
+            const checkbox = labelEl.createEl('input', {
+              attr: { id: hunkId, type: 'checkbox' },
+            });
+            checkbox.checked = true;
+            labelEl.createSpan({
+              text: `Change ${hunkIndex + 1} · line ${hunk.oldStart}`,
+            });
+            checkbox.addEventListener('change', () => {
+              if (checkbox.checked) selectedHunks[proposal.path].add(hunk.id);
+              else selectedHunks[proposal.path].delete(hunk.id);
+            });
+            const diffEl = hunkEl.createDiv({
+              cls: 'claudian-collaboration-proposal-diff',
+            });
+            renderDiffContent(diffEl, hunk.diffLines, 0);
+          });
+        }
         const applyButton = actionsEl.createEl('button', {
           cls: 'claudian-collaboration-retry',
-          text: `Apply ${this.getParticipantLabel(delivery.providerId)}`,
+          text: `Apply selected from ${this.getParticipantLabel(delivery.providerId)}`,
           attr: {
             type: 'button',
-            'aria-label': `Explicitly apply ${this.getParticipantLabel(delivery.providerId)} proposal`,
+            'aria-label': `Apply selected changes from ${
+              this.getParticipantLabel(delivery.providerId)
+            } proposal`,
           },
         });
         applyButton.addEventListener('click', () => {
+          const selection = Object.fromEntries(
+            Object.entries(selectedHunks).map(([path, ids]) => [path, [...ids]]),
+          );
+          if (Object.values(selection).every(ids => ids.length === 0)) return;
           applyButton.disabled = true;
-          void this.options.onApplyProposal(delivery.eventId, delivery.providerId)
+          void this.options.onApplyProposal(
+            delivery.eventId,
+            delivery.providerId,
+            selection,
+          )
             .catch(() => { applyButton.disabled = false; });
         });
       }

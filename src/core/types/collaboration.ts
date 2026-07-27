@@ -53,7 +53,10 @@ export interface CollaborationFileProposal {
   participantId: string;
   baseRevision: string;
   currentRevision: string;
+  /** Missing only on proposals persisted before line-level review was introduced. */
+  acceptedContent?: string;
   proposedContent: string;
+  summary?: string;
   createdAt: number;
 }
 
