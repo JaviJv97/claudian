@@ -1,5 +1,8 @@
 import type { CollaborationRoom } from '@/core/types';
-import { findCollaborationRebindCandidates } from '@/features/chat/collaboration/collaborationRebinding';
+import {
+  findCollaborationProfileRepairs,
+  findCollaborationRebindCandidates,
+} from '@/features/chat/collaboration/collaborationRebinding';
 
 const room: CollaborationRoom = {
   version: 1,
@@ -118,5 +121,38 @@ describe('findCollaborationRebindCandidates', () => {
         roomId: 'room-1',
       },
     ])).toEqual([]);
+  });
+});
+
+describe('findCollaborationProfileRepairs', () => {
+  it('restores room-owned runtime profiles missing from bound conversations', () => {
+    const profiledRoom: CollaborationRoom = {
+      ...room,
+      participants: [
+        {
+          id: 'claude-personal',
+          providerId: 'claude',
+          runtimeProfileId: 'personal',
+          conversationId: 'personal-conversation',
+        },
+        {
+          id: 'claude-company',
+          providerId: 'claude',
+          runtimeProfileId: 'company',
+          conversationId: 'company-conversation',
+        },
+      ],
+    };
+
+    expect(findCollaborationProfileRepairs(profiledRoom, [
+      { id: 'personal-conversation', runtimeProfileId: 'personal' },
+      { id: 'company-conversation' },
+    ])).toEqual([
+      {
+        participantId: 'claude-company',
+        conversationId: 'company-conversation',
+        runtimeProfileId: 'company',
+      },
+    ]);
   });
 });

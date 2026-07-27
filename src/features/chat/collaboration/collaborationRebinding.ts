@@ -18,6 +18,36 @@ export interface CollaborationRebindCandidate {
   conversationId: string;
 }
 
+export interface CollaborationProfileRepair {
+  participantId: string;
+  conversationId: string;
+  runtimeProfileId: string;
+}
+
+export function findCollaborationProfileRepairs(
+  room: CollaborationRoom,
+  conversations: readonly { id: string; runtimeProfileId?: string }[],
+): CollaborationProfileRepair[] {
+  const profilesByConversationId = new Map(
+    conversations.map(conversation => [conversation.id, conversation.runtimeProfileId]),
+  );
+
+  return room.participants.flatMap((participant) => {
+    if (
+      !participant.runtimeProfileId
+      || !profilesByConversationId.has(participant.conversationId)
+      || profilesByConversationId.get(participant.conversationId) === participant.runtimeProfileId
+    ) {
+      return [];
+    }
+    return [{
+      participantId: getCollaborationParticipantId(participant),
+      conversationId: participant.conversationId,
+      runtimeProfileId: participant.runtimeProfileId,
+    }];
+  });
+}
+
 export function findCollaborationRebindCandidates(
   room: CollaborationRoom,
   tabs: readonly CollaborationTabIdentity[],

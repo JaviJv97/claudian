@@ -58,7 +58,10 @@ import {
   applyCollaborationProposalHunks,
   createCollaborationProposalReview,
 } from './collaboration/collaborationProposalReview';
-import { findCollaborationRebindCandidates } from './collaboration/collaborationRebinding';
+import {
+  findCollaborationProfileRepairs,
+  findCollaborationRebindCandidates,
+} from './collaboration/collaborationRebinding';
 import { CollaborationResourcePolicyModal } from './collaboration/CollaborationResourcePolicyModal';
 import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
 import {
@@ -1477,6 +1480,17 @@ export class ClaudianView extends ItemView {
           ),
         });
       }
+      const conversationProfiles = room.participants.flatMap((participant) => {
+        const conversation = this.plugin.getConversationSync(participant.conversationId);
+        return conversation
+          ? [{ id: conversation.id, runtimeProfileId: conversation.runtimeProfileId }]
+          : [];
+      });
+      for (const repair of findCollaborationProfileRepairs(room, conversationProfiles)) {
+        await this.plugin.updateConversation(repair.conversationId, {
+          runtimeProfileId: repair.runtimeProfileId,
+        });
+      }
       const tabIdentities = tabs.map(tab => ({
         tabId: tab.id,
         providerId: tab.providerId,
@@ -1702,7 +1716,11 @@ export class ClaudianView extends ItemView {
                   new Notice(`${participant.label ?? participantId} tab is unavailable.`);
                   throw new Error('Participant tab is unavailable.');
                 }
-                if (!participantTab.service || !participantTab.serviceInitialized) {
+                if (
+                  !participantTab.service
+                  || !participantTab.serviceInitialized
+                  || participantTab.service.runtimeProfileId !== participant.runtimeProfileId
+                ) {
                   await initializeTabService(participantTab, this.plugin);
                   setupServiceCallbacks(participantTab, this.plugin);
                 }
