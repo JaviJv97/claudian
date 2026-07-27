@@ -24,6 +24,46 @@ export interface CollaborationProfileRepair {
   runtimeProfileId: string;
 }
 
+export interface CollaborationTabReadiness {
+  tabId: TabId;
+  conversationId: string | null;
+  currentConversationId: string | null;
+  hydrationState: 'idle' | 'loading' | 'ready' | 'failed';
+}
+
+export interface CollaborationRecipientReadiness {
+  tabIdsToHydrate: TabId[];
+  missingParticipantIds: string[];
+}
+
+export function findCollaborationRecipientReadiness(
+  room: CollaborationRoom,
+  participantIds: readonly string[],
+  tabs: readonly CollaborationTabReadiness[],
+): CollaborationRecipientReadiness {
+  const tabIdsToHydrate: TabId[] = [];
+  const missingParticipantIds: string[] = [];
+  for (const participantId of participantIds) {
+    const participant = room.participants.find(candidate => (
+      getCollaborationParticipantId(candidate) === participantId
+    ));
+    const tab = participant
+      ? tabs.find(candidate => candidate.conversationId === participant.conversationId)
+      : undefined;
+    if (!participant || !tab) {
+      missingParticipantIds.push(participantId);
+      continue;
+    }
+    if (
+      tab.hydrationState !== 'ready'
+      || tab.currentConversationId !== participant.conversationId
+    ) {
+      tabIdsToHydrate.push(tab.tabId);
+    }
+  }
+  return { tabIdsToHydrate, missingParticipantIds };
+}
+
 export function findCollaborationProfileRepairs(
   room: CollaborationRoom,
   conversations: readonly { id: string; runtimeProfileId?: string }[],

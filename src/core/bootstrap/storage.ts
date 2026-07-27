@@ -16,6 +16,7 @@ export interface CollaborationRoomStorage {
     participants: CollaborationParticipant[];
     now?: number;
   }): Promise<CollaborationRoom>;
+  restore(room: CollaborationRoom): Promise<CollaborationRoom>;
   get(id: string): Promise<CollaborationRoom | null>;
   list(): Promise<CollaborationRoom[]>;
   delete(id: string): Promise<void>;

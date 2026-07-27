@@ -55,6 +55,40 @@ describe('CollaborationRoomRepository', () => {
     );
   });
 
+  it('restores portable history while clearing machine-specific cursors and archive state', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+
+    const restored = await repository.restore({
+      version: 1,
+      id: 'room-imported',
+      title: 'Imported room',
+      status: 'archived',
+      archivedAt: 150,
+      participantLastSeenEventIds: { codex: 'event-1' },
+      createdAt: 100,
+      updatedAt: 150,
+      participants: [{
+        id: 'codex',
+        providerId: 'codex',
+        conversationId: 'conversation-codex',
+      }],
+      events: [{
+        id: 'event-1',
+        kind: 'message',
+        authorId: 'user',
+        recipientIds: ['codex'],
+        content: 'Continue',
+        createdAt: 110,
+        delivery: { codex: { status: 'completed' } },
+      }],
+    });
+
+    expect(restored.status).toBe('active');
+    expect(restored.archivedAt).toBeUndefined();
+    expect(restored.participantLastSeenEventIds).toEqual({});
+    expect((await repository.get(restored.id))?.events).toHaveLength(1);
+  });
+
   it('appends events without dropping earlier events', async () => {
     const repository = new CollaborationRoomRepository(createAdapter());
     await repository.create({

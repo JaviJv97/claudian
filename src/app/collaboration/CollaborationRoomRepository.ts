@@ -55,6 +55,26 @@ export class CollaborationRoomRepository {
     return room;
   }
 
+  async restore(room: CollaborationRoom): Promise<CollaborationRoom> {
+    assertRoomId(room.id);
+    if (await this.get(room.id)) {
+      throw new Error(`Collaboration room already exists: ${room.id}`);
+    }
+    const participantIds = room.participants.map(getCollaborationParticipantId);
+    if (new Set(participantIds).size !== participantIds.length) {
+      throw new Error('Collaboration room contains duplicate participants');
+    }
+    const restored: CollaborationRoom = {
+      ...structuredClone(room),
+      version: 1,
+      status: 'active',
+      archivedAt: undefined,
+      participantLastSeenEventIds: {},
+    };
+    await this.write(restored);
+    return restored;
+  }
+
   async get(id: string): Promise<CollaborationRoom | null> {
     assertRoomId(id);
     const path = this.getPath(id);

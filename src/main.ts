@@ -257,6 +257,23 @@ export default class ClaudianPlugin extends Plugin {
       });
 
       this.addCommand({
+        id: 'export-current-collaboration-room',
+        name: 'Export current collaboration room for another computer',
+        callback: async () => {
+          await this.getView()?.exportCurrentCollaborationRoom();
+        },
+      });
+
+      this.addCommand({
+        id: 'import-latest-portable-collaboration-room',
+        name: 'Import latest portable collaboration room',
+        callback: async () => {
+          const view = await this.ensureViewOpen();
+          await view?.importLatestPortableCollaborationRoom();
+        },
+      });
+
+      this.addCommand({
         id: 'reopen-latest-collaboration',
         name: 'Reopen latest archived collaboration room',
         callback: async () => {

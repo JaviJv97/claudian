@@ -43,6 +43,10 @@ import {
   updateCollaborationDraftTaskAssignment,
   updateCollaborationDraftTaskContract,
 } from '../../core/collaboration/collaborationWorkQueue';
+import {
+  createPortableCollaborationRoom,
+  parsePortableCollaborationRoom,
+} from '../../core/collaboration/portableCollaborationRoom';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
 import {
@@ -56,6 +60,7 @@ import { ClaudeProcessRegistry } from '../../core/runtime/ClaudeProcessRegistry'
 import type {
   CollaborationDeliberationPhase,
   CollaborationEvent,
+  CollaborationRoom,
   CollaborationWorkflowPhase,
   ImageAttachment,
 } from '../../core/types';
@@ -80,6 +85,7 @@ import {
 import {
   findCollaborationProfileRepairs,
   findCollaborationRebindCandidates,
+  findCollaborationRecipientReadiness,
 } from './collaboration/collaborationRebinding';
 import { CollaborationResourcePolicyModal } from './collaboration/CollaborationResourcePolicyModal';
 import { findFreshAssistantMessage } from './collaboration/collaborationResponse';
@@ -753,6 +759,162 @@ export class ClaudianView extends ItemView {
     return true;
   }
 
+  async exportCurrentCollaborationRoom(): Promise<boolean> {
+    const activeTab = this.tabManager?.getActiveTab();
+    const conversation = activeTab?.conversationId
+      ? this.plugin.getConversationSync(activeTab.conversationId)
+      : null;
+    const roomId = conversation?.collaboration?.roomId;
+    if (!roomId) {
+      new Notice('The active tab is not part of a collaboration room.');
+      return false;
+    }
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room) {
+      new Notice('Collaboration room not found.');
+      return false;
+    }
+    const portable = createPortableCollaborationRoom(room);
+    const filename = `${room.id}-${portable.exportedAt}.portable-room.json`;
+    await this.plugin.storage.getAdapter().write(
+      `.claudian/portable-rooms/${filename}`,
+      JSON.stringify(portable, null, 2),
+    );
+    new Notice(
+      portable.machineLocalReferences.length > 0
+        ? `Portable room exported with ${portable.machineLocalReferences.length} machine-local path reference(s) to remap.`
+        : 'Portable collaboration room exported.',
+    );
+    return true;
+  }
+
+  async importLatestPortableCollaborationRoom(): Promise<boolean> {
+    if (!this.tabManager) return false;
+    const adapter = this.plugin.storage.getAdapter();
+    const files = (await adapter.listFiles('.claudian/portable-rooms'))
+      .filter(path => path.endsWith('.portable-room.json'))
+      .sort()
+      .reverse();
+    const sourcePath = files[0];
+    if (!sourcePath) {
+      new Notice('No portable collaboration room exports found.');
+      return false;
+    }
+
+    let portable;
+    try {
+      portable = parsePortableCollaborationRoom(await adapter.read(sourcePath));
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Could not read portable room.');
+      return false;
+    }
+
+    const reusableBlankTabs = this.tabManager.getAllTabs().filter(tab => (
+      tab.lifecycleState === 'blank'
+      && !tab.state.isStreaming
+      && !tab.state.isRewinding
+    ));
+    const reusableCount = Math.min(reusableBlankTabs.length, portable.participants.length);
+    const additionalTabsNeeded = portable.participants.length - reusableCount;
+    const maxTabs = Math.max(3, Math.min(10, this.plugin.settings.maxTabs ?? 3));
+    if (this.tabManager.getTabCount() + additionalTabsNeeded > maxTabs) {
+      new Notice(`Importing this room needs ${portable.participants.length} agent tabs.`);
+      return false;
+    }
+
+    const roomId = createCollaborationRoomId();
+    const createdConversationIds: string[] = [];
+    const createdTabIds: TabId[] = [];
+    const reusedTabIds: TabId[] = [];
+    let roomCreated = false;
+    try {
+      const conversations = await Promise.all(portable.participants.map(async participant => {
+        const conversation = await this.plugin.createConversation({
+          providerId: participant.providerId,
+          runtimeProfileId: participant.runtimeProfileId,
+        });
+        createdConversationIds.push(conversation.id);
+        return { participant, conversation };
+      }));
+      const conversationIds = Object.fromEntries(
+        conversations.map(({ participant, conversation }) => [participant.id, conversation.id]),
+      );
+      const memberships = createCollaborationMemberships(roomId, conversationIds);
+      const restoredRoom: CollaborationRoom = {
+        version: 1,
+        id: roomId,
+        title: portable.title,
+        status: 'active',
+        discussionMode: portable.discussionMode,
+        participantLastSeenEventIds: {},
+        createdAt: portable.createdAt,
+        updatedAt: portable.updatedAt,
+        participants: conversations.map(({ participant, conversation }) => ({
+          id: participant.id,
+          providerId: participant.providerId,
+          label: participant.label,
+          runtimeProfileId: participant.runtimeProfileId,
+          conversationId: conversation.id,
+          resourcePolicy: participant.resourceMode
+            ? { mode: participant.resourceMode }
+            : undefined,
+        })),
+        events: portable.events.map(({ attachments: _attachments, ...event }) => event),
+        workQueue: portable.workQueue ? structuredClone(portable.workQueue) : undefined,
+        workQueueHistory: portable.workQueueHistory
+          ? structuredClone(portable.workQueueHistory)
+          : undefined,
+      };
+      await this.plugin.storage.rooms.restore(restoredRoom);
+      roomCreated = true;
+      await Promise.all(conversations.map(({ participant, conversation }) => (
+        this.plugin.updateConversation(conversation.id, {
+          title: `Collaboration · ${participant.label ?? participant.id}`,
+          collaboration: memberships[participant.id],
+        })
+      )));
+
+      for (const [index, { conversation }] of conversations.entries()) {
+        const reusableTab = reusableBlankTabs[index];
+        if (reusableTab) {
+          await this.tabManager.switchToTab(reusableTab.id);
+          await this.tabManager.openConversation(conversation.id, {
+            activate: index === conversations.length - 1,
+            preferNewTab: false,
+          });
+          reusedTabIds.push(reusableTab.id);
+          continue;
+        }
+        const tab = await this.tabManager.createTab(conversation.id, undefined, {
+          activate: index === conversations.length - 1,
+        });
+        if (!tab) throw new Error('Could not open every imported participant.');
+        createdTabIds.push(tab.id);
+      }
+      this.updateTabBarVisibility();
+      await this.reconcileCollaborationTimelines();
+      new Notice(
+        portable.machineLocalReferences.length > 0
+          ? `${portable.title} imported. Remap ${portable.machineLocalReferences.length} machine-local path reference(s) before execution.`
+          : `${portable.title} imported and ready to reconnect.`,
+      );
+      return true;
+    } catch (error) {
+      for (const tabId of createdTabIds) {
+        await this.tabManager.closeTab(tabId, true).catch(() => undefined);
+      }
+      for (const tabId of reusedTabIds) {
+        await this.tabManager.getTab(tabId)?.controllers.conversationController
+          ?.createNew({ force: true })
+          .catch(() => undefined);
+      }
+      if (roomCreated) await this.plugin.storage.rooms.delete(roomId).catch(() => undefined);
+      await Promise.allSettled(createdConversationIds.map(id => this.plugin.deleteConversation(id)));
+      new Notice(error instanceof Error ? error.message : 'Could not import portable room.');
+      return false;
+    }
+  }
+
   async reopenLatestCollaboration(): Promise<boolean> {
     if (!this.tabManager) return false;
     const room = (await this.plugin.storage.rooms.list())
@@ -996,6 +1158,13 @@ export class ClaudianView extends ItemView {
       && !/(^|\s)@(?:all|[A-Za-z0-9][A-Za-z0-9._-]*)\b/i.test(content)
     ) {
       new Notice('Mention an agent or choose a recipient in mentioned-only mode.');
+      return true;
+    }
+    if (!await this.ensureCollaborationRecipientsReady(
+      room,
+      collaborationTurn.recipientIds,
+      originTabId,
+    )) {
       return true;
     }
     const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
@@ -2765,6 +2934,49 @@ export class ClaudianView extends ItemView {
 
   private getCollaborationDeliveryKey(roomId: string, participantId: string): string {
     return `${roomId}:${participantId}`;
+  }
+
+  private async ensureCollaborationRecipientsReady(
+    room: CollaborationRoom,
+    participantIds: readonly string[],
+    originTabId: TabId,
+  ): Promise<boolean> {
+    if (!this.tabManager) return false;
+    const getReadiness = () => findCollaborationRecipientReadiness(
+      room,
+      participantIds,
+      this.tabManager!.getAllTabs().map(tab => ({
+        tabId: tab.id,
+        conversationId: tab.conversationId,
+        currentConversationId: tab.state.currentConversationId,
+        hydrationState: tab.hydrationState,
+      })),
+    );
+    const initial = getReadiness();
+    if (initial.missingParticipantIds.length > 0) {
+      new Notice(
+        `Reconnect ${initial.missingParticipantIds.join(', ')} before sending this message.`,
+      );
+      return false;
+    }
+    try {
+      for (const tabId of initial.tabIdsToHydrate) {
+        await this.tabManager.switchToTab(tabId);
+      }
+    } catch {
+      new Notice('Could not reconnect every collaboration participant.');
+      return false;
+    } finally {
+      if (this.tabManager.getTab(originTabId)) {
+        await this.tabManager.switchToTab(originTabId).catch(() => undefined);
+      }
+    }
+    const final = getReadiness();
+    if (final.missingParticipantIds.length > 0 || final.tabIdsToHydrate.length > 0) {
+      new Notice('A collaboration participant could not be restored. Reopen the room and retry.');
+      return false;
+    }
+    return true;
   }
 
   private queueCollaborationMessage(

@@ -2,6 +2,7 @@ import type { CollaborationRoom } from '@/core/types';
 import {
   findCollaborationProfileRepairs,
   findCollaborationRebindCandidates,
+  findCollaborationRecipientReadiness,
 } from '@/features/chat/collaboration/collaborationRebinding';
 
 const room: CollaborationRoom = {
@@ -121,6 +122,40 @@ describe('findCollaborationRebindCandidates', () => {
         roomId: 'room-1',
       },
     ])).toEqual([]);
+  });
+});
+
+describe('findCollaborationRecipientReadiness', () => {
+  it('requires cold participant tabs to hydrate before dispatch', () => {
+    expect(findCollaborationRecipientReadiness(room, ['claude', 'codex'], [
+      {
+        tabId: 'claude-tab',
+        conversationId: 'claude-old',
+        currentConversationId: 'claude-old',
+        hydrationState: 'ready',
+      },
+      {
+        tabId: 'codex-tab',
+        conversationId: 'codex-old',
+        currentConversationId: null,
+        hydrationState: 'idle',
+      },
+    ])).toEqual({
+      tabIdsToHydrate: ['codex-tab'],
+      missingParticipantIds: [],
+    });
+  });
+
+  it('reports a missing canonical participant tab instead of rebinding provider session identity', () => {
+    expect(findCollaborationRecipientReadiness(room, ['codex'], [{
+      tabId: 'codex-native-tab',
+      conversationId: '019f-native-session',
+      currentConversationId: '019f-native-session',
+      hydrationState: 'ready',
+    }])).toEqual({
+      tabIdsToHydrate: [],
+      missingParticipantIds: ['codex'],
+    });
   });
 });
 
