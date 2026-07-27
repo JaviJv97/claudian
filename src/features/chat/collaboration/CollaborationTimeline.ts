@@ -47,6 +47,8 @@ interface CollaborationTimelineOptions {
     selectedHunks: Record<string, string[]>,
   ) => Promise<void>;
   onStartApprovedPlan: (deliberationId: string) => Promise<void>;
+  onCreateWorkQueue: (deliberationId: string) => Promise<void>;
+  onApproveWorkQueue: () => Promise<void>;
   onRetryApprovedPlan: (deliberationId: string) => Promise<void>;
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
   onRequestWorkflowChanges: (workflowId: string, deliberationId: string) => Promise<void>;
@@ -481,19 +483,22 @@ export class CollaborationTimeline {
         if (outcome.status !== 'rejected' && !workflowStarted) {
           const startButton = statusEl.createEl('button', {
             cls: 'claudian-collaboration-start-plan',
-            text: 'Start approved plan',
+            text: room.workQueue?.sourceDeliberationId === event.deliberationId
+              ? 'Queue created'
+              : 'Create task queue',
             attr: {
               type: 'button',
-              'aria-label': 'Start autonomous execution of the approved plan',
+              'aria-label': 'Create a reviewable task queue from the approved plan',
             },
           });
+          startButton.disabled = room.workQueue?.sourceDeliberationId === event.deliberationId;
           startButton.addEventListener('click', () => {
             startButton.disabled = true;
-            startButton.setText('Starting…');
-            void this.options.onStartApprovedPlan(event.deliberationId!)
+            startButton.setText('Creating…');
+            void this.options.onCreateWorkQueue(event.deliberationId!)
               .catch(() => {
                 startButton.disabled = false;
-                startButton.setText('Start approved plan');
+                startButton.setText('Create task queue');
               });
           });
         }
@@ -617,8 +622,69 @@ export class CollaborationTimeline {
       }
       if (generation !== this.renderGeneration) return;
     }
+    this.renderWorkQueue(room);
     this.renderRecovery(room);
     this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
+  }
+
+  private renderWorkQueue(room: CollaborationRoom): void {
+    const queue = room.workQueue;
+    if (!queue) return;
+    const panel = this.timelineEl.createDiv({
+      cls: 'claudian-collaboration-work-queue',
+      attr: { 'aria-label': 'Collaboration work queue' },
+    });
+    const header = panel.createDiv({ cls: 'claudian-collaboration-work-queue-header' });
+    header.createDiv({ cls: 'claudian-collaboration-work-queue-kicker', text: 'Work queue' });
+    header.createDiv({
+      cls: 'claudian-collaboration-work-queue-state',
+      text: queue.status,
+      attr: { 'data-status': queue.status },
+    });
+    panel.createDiv({
+      cls: 'claudian-collaboration-work-queue-summary',
+      text: `${queue.tasks.filter(task => task.status === 'ready').length} ready · ${
+        queue.tasks.filter(task => task.status === 'blocked').length
+      } blocked · ${queue.tasks.filter(task => task.status === 'done').length} done`,
+    });
+    const list = panel.createDiv({ cls: 'claudian-collaboration-work-queue-list' });
+    for (const task of queue.tasks) {
+      const item = list.createDiv({
+        cls: 'claudian-collaboration-work-task',
+        attr: { 'data-status': task.status },
+      });
+      const top = item.createDiv({ cls: 'claudian-collaboration-work-task-top' });
+      top.createSpan({ cls: 'claudian-collaboration-work-task-id', text: task.id });
+      top.createSpan({ cls: 'claudian-collaboration-work-task-status', text: task.status });
+      item.createDiv({ cls: 'claudian-collaboration-work-task-title', text: task.title });
+      item.createDiv({
+        cls: 'claudian-collaboration-work-task-meta',
+        text: `${this.getParticipantLabel(task.ownerId)} → ${
+          this.getParticipantLabel(task.reviewerId)
+        } · ${task.fileScopes.join(', ')}`,
+      });
+      if (task.dependsOn.length > 0) {
+        item.createDiv({
+          cls: 'claudian-collaboration-work-task-dependencies',
+          text: `After ${task.dependsOn.join(', ')}`,
+        });
+      }
+    }
+    if (queue.status === 'draft') {
+      const approve = panel.createEl('button', {
+        cls: 'claudian-collaboration-work-queue-approve',
+        text: 'Approve queue',
+        attr: { type: 'button' },
+      });
+      approve.addEventListener('click', () => {
+        approve.disabled = true;
+        approve.setText('Validating…');
+        void this.options.onApproveWorkQueue().catch(() => {
+          approve.disabled = false;
+          approve.setText('Approve queue');
+        });
+      });
+    }
   }
 
   private renderRecovery(room: CollaborationRoom): void {

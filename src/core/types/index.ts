@@ -29,8 +29,13 @@ export {
   type CollaborationRecipientId,
   type CollaborationResourceUsageSnapshot,
   type CollaborationRoom,
+  type CollaborationTaskEvidence,
+  type CollaborationTaskStatus,
+  type CollaborationTaskVerificationResult,
   type CollaborationWorkflowMetadata,
   type CollaborationWorkflowPhase,
+  type CollaborationWorkQueue,
+  type CollaborationWorkTask,
 } from './collaboration';
 export { type ProviderId } from './provider';
 

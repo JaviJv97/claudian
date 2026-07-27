@@ -26,6 +26,10 @@ import {
   buildCollaborationReviewInstruction,
   buildCollaborationVerificationInstruction,
 } from '../../core/collaboration/collaborationWorkflow';
+import {
+  approveCollaborationWorkQueue,
+  parseCollaborationTaskGraph,
+} from '../../core/collaboration/collaborationWorkQueue';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
 import {
@@ -1811,6 +1815,12 @@ export class ClaudianView extends ItemView {
           onStartApprovedPlan: async (deliberationId) => {
             await this.startApprovedCollaborationPlan(tab.id, roomId, deliberationId);
           },
+          onCreateWorkQueue: async (deliberationId) => {
+            await this.createCollaborationWorkQueue(roomId, deliberationId);
+          },
+          onApproveWorkQueue: async () => {
+            await this.approveCollaborationWorkQueue(roomId);
+          },
           onRetryApprovedPlan: async (deliberationId) => {
             await this.startApprovedCollaborationPlan(
               tab.id,
@@ -1984,6 +1994,50 @@ export class ClaudianView extends ItemView {
       delivery: {},
     });
     this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async createCollaborationWorkQueue(
+    roomId: string,
+    deliberationId: string,
+  ): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room) throw new Error('Collaboration room not found');
+    const outcome = [...room.events].reverse().find(event => (
+      event.deliberationId === deliberationId && event.deliberationOutcome
+    ));
+    if (!outcome?.deliberationOutcome || outcome.deliberationOutcome.status === 'rejected') {
+      throw new Error('The plan is not approved');
+    }
+    const synthesis = room.events.find(event => (
+      event.id === outcome.deliberationOutcome?.synthesisEventId
+    ));
+    if (!synthesis) throw new Error('Approved synthesis not found');
+    try {
+      const queue = parseCollaborationTaskGraph(synthesis.content, deliberationId);
+      await this.plugin.storage.rooms.updateWorkQueue(roomId, queue);
+      new Notice('Draft task queue created. Review it before approval.');
+      this.refreshCollaborationTimelines(roomId);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Could not create task queue');
+      throw error;
+    }
+  }
+
+  private async approveCollaborationWorkQueue(roomId: string): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    try {
+      const queue = approveCollaborationWorkQueue(
+        room.workQueue,
+        room.participants.map(getCollaborationParticipantId),
+      );
+      await this.plugin.storage.rooms.updateWorkQueue(roomId, queue);
+      new Notice('Task queue approved. Unblocked tasks are ready.');
+      this.refreshCollaborationTimelines(roomId);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Queue validation failed');
+      throw error;
+    }
   }
 
   private async startApprovedCollaborationPlan(

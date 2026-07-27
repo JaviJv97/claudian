@@ -6,6 +6,7 @@ import type {
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
+  CollaborationWorkQueue,
 } from '../types';
 
 export interface CollaborationRoomStorage {
@@ -55,6 +56,11 @@ export interface CollaborationRoomStorage {
     eventId: string,
     participantId: string,
     delivery: CollaborationDelivery,
+  ): Promise<CollaborationRoom>;
+  updateWorkQueue(
+    roomId: string,
+    workQueue: CollaborationWorkQueue,
+    now?: number,
   ): Promise<CollaborationRoom>;
 }
 

@@ -22,6 +22,60 @@ export type CollaborationDeliberationPhase =
   | 'synthesis'
   | 'ratification';
 export type CollaborationWorkflowPhase = 'execution' | 'review' | 'verification' | 'checkpoint';
+export type CollaborationTaskStatus =
+  | 'draft'
+  | 'blocked'
+  | 'ready'
+  | 'running'
+  | 'review'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export interface CollaborationTaskVerificationResult {
+  command: string;
+  status: 'passed' | 'failed';
+  output?: string;
+}
+
+export interface CollaborationTaskEvidence {
+  summary: string;
+  filesChanged: string[];
+  acceptanceCriteriaMet: string[];
+  verificationResults: CollaborationTaskVerificationResult[];
+  commitSha?: string;
+  knownLimitations?: string[];
+  completedAt?: number;
+}
+
+export interface CollaborationWorkTask {
+  id: string;
+  title: string;
+  description: string;
+  status: CollaborationTaskStatus;
+  ownerId: string;
+  reviewerId: string;
+  dependsOn: string[];
+  fileScopes: string[];
+  acceptanceCriteria: string[];
+  verificationCommands: string[];
+  risk: 'low' | 'medium' | 'high';
+  attempts: number;
+  maxAttempts: number;
+  evidence?: CollaborationTaskEvidence;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CollaborationWorkQueue {
+  version: 1;
+  status: 'draft' | 'approved' | 'paused' | 'completed';
+  sourceDeliberationId: string;
+  createdAt: number;
+  updatedAt: number;
+  approvedAt?: number;
+  tasks: CollaborationWorkTask[];
+}
 
 export interface CollaborationDeliberationOutcome {
   status: 'unanimous' | 'approved-with-concerns' | 'rejected';
@@ -148,4 +202,5 @@ export interface CollaborationRoom {
   updatedAt: number;
   participants: CollaborationParticipant[];
   events: CollaborationEvent[];
+  workQueue?: CollaborationWorkQueue;
 }

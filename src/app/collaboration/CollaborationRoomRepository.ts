@@ -6,6 +6,7 @@ import type {
   CollaborationEvent,
   CollaborationParticipant,
   CollaborationRoom,
+  CollaborationWorkQueue,
 } from '../../core/types';
 
 const ROOMS_PATH = '.claudian/rooms';
@@ -223,6 +224,18 @@ export class CollaborationRoomRepository {
         room.updatedAt,
         delivery.completedAt ?? delivery.startedAt ?? Date.now(),
       );
+      return room;
+    });
+  }
+
+  async updateWorkQueue(
+    roomId: string,
+    workQueue: CollaborationWorkQueue,
+    now = Date.now(),
+  ): Promise<CollaborationRoom> {
+    return this.mutate(roomId, (room) => {
+      room.workQueue = structuredClone(workQueue);
+      room.updatedAt = Math.max(room.updatedAt, now, workQueue.updatedAt);
       return room;
     });
   }

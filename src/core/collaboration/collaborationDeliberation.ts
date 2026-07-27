@@ -45,7 +45,17 @@ export function buildDeliberationInstruction(
     : phase === 'critique'
       ? 'Critique specific claims from the independent positions. State concrete agreement and dissent with attribution. Do not restate entire positions. Keep your response under 300 words.'
       : phase === 'synthesis'
-        ? 'Propose one actionable synthesis grounded in the attributed positions and critiques. Preserve unresolved objections; do not claim consensus. Assign a bounded responsibility to each named participant. Keep your response under 400 words.'
+        ? [
+          'Propose one actionable synthesis grounded in the attributed positions and critiques. Preserve unresolved objections; do not claim consensus.',
+          `Use only these participant IDs for ownership and review: ${room.participants.map(
+            participant => getCollaborationParticipantId(participant),
+          ).join(', ')}.`,
+          'End with exactly one fenced JSON block using this schema:',
+          '```task-graph',
+          '{"tasks":[{"id":"TASK-001","title":"Short title","description":"Bounded deliverable","ownerId":"participant-id","reviewerId":"different-participant-id","dependsOn":[],"fileScopes":["path/**"],"acceptanceCriteria":["observable result"],"verificationCommands":["exact command"],"risk":"low|medium|high"}]}',
+          '```',
+          'Every task needs bounded file scopes, objective acceptance criteria, and executable verification commands. ownerId and reviewerId must differ. Keep prose before the task graph under 400 words.',
+        ].join('\n')
         : [
           'Evaluate the proposed synthesis without proposing a different process.',
           'Respond in this exact format:',

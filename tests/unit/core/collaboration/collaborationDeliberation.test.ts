@@ -33,6 +33,21 @@ describe('collaboration deliberation', () => {
     expect(instruction).toContain('Keep your response under 300 words');
   });
 
+  it('requires a machine-readable, independently reviewed task graph in synthesis', () => {
+    const instruction = buildDeliberationInstruction(
+      room,
+      'synthesis',
+      'Build the feature',
+      'd-1',
+      'codex',
+    );
+
+    expect(instruction).toContain('```task-graph');
+    expect(instruction).toContain('"ownerId"');
+    expect(instruction).toContain('ownerId and reviewerId must differ');
+    expect(instruction).toContain('personal, company, codex');
+  });
+
   it('requires explicit unanimous approval and preserves objections', () => {
     const events = [
       ['personal', 'APPROVE Good synthesis'],
