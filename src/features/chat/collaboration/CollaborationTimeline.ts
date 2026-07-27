@@ -871,10 +871,23 @@ export class CollaborationTimeline {
         queue.status === 'approved'
         && (task.status === 'ready' || task.status === 'failed')
       ) {
+        const ownerWeeklyUsage = (
+          this.options.participantResourcePolicies[task.ownerId]?.weeklyUsagePercent
+        );
+        const readyLabel = ownerWeeklyUsage !== undefined && ownerWeeklyUsage >= 90
+          ? `Run task · ${ownerWeeklyUsage}% week`
+          : 'Run task';
         const action = item.createEl('button', {
           cls: 'claudian-collaboration-work-task-action',
-          text: task.status === 'ready' ? 'Run task' : 'Prepare retry',
-          attr: { type: 'button' },
+          text: task.status === 'ready' ? readyLabel : 'Prepare retry',
+          attr: {
+            type: 'button',
+            title: task.status === 'ready' && ownerWeeklyUsage !== undefined
+              ? `${this.getParticipantLabel(task.ownerId)} is at ${
+                ownerWeeklyUsage
+              }% weekly usage`
+              : '',
+          },
         });
         action.addEventListener('click', () => {
           action.disabled = true;
@@ -884,7 +897,7 @@ export class CollaborationTimeline {
             : this.options.onRetryWorkTask(task.id);
           void operation.catch(() => {
             action.disabled = false;
-            action.setText(task.status === 'ready' ? 'Run task' : 'Prepare retry');
+            action.setText(task.status === 'ready' ? readyLabel : 'Prepare retry');
           });
         });
       }

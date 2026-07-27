@@ -2320,33 +2320,46 @@ export class ClaudianView extends ItemView {
     ));
     const workflowId = `task-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     new Notice(`${task.id} started with ${task.ownerId}; ${task.reviewerId} will review.`);
-    const handled = await this.routeCollaborationMessage(
-      originTabId,
-      `@${task.ownerId} @${task.reviewerId} Execute queue task ${task.id}`,
-      undefined,
-      {
-        id: workflowId,
-        deliberationId: room.workQueue.sourceDeliberationId,
-        originalGoal: original?.content ?? task.description,
-        approvedSynthesis: synthesis?.content ?? task.description,
-        taskId,
-      },
-    );
-    if (!handled) {
+    const failStartedTask = async (): Promise<void> => {
       const latest = await this.plugin.storage.rooms.get(roomId);
       if (latest?.workQueue) {
-        const failed = transitionCollaborationTask(
-          latest.workQueue,
-          taskId,
-          'failed',
-          { actorId: task.reviewerId },
-        );
-        await this.plugin.storage.rooms.updateWorkQueue(
-          roomId,
-          failed,
-          latest.workQueue.updatedAt,
-        );
+        const latestTask = latest.workQueue.tasks.find(candidate => candidate.id === taskId);
+        if (latestTask?.status === 'running' || latestTask?.status === 'review') {
+          const failed = transitionCollaborationTask(
+            latest.workQueue,
+            taskId,
+            'failed',
+            { actorId: task.reviewerId },
+          );
+          await this.plugin.storage.rooms.updateWorkQueue(
+            roomId,
+            failed,
+            latest.workQueue.updatedAt,
+          );
+          this.refreshCollaborationTimelines(roomId);
+        }
       }
+    };
+    let handled: boolean;
+    try {
+      handled = await this.routeCollaborationMessage(
+        originTabId,
+        `@${task.ownerId} @${task.reviewerId} Execute queue task ${task.id}`,
+        undefined,
+        {
+          id: workflowId,
+          deliberationId: room.workQueue.sourceDeliberationId,
+          originalGoal: original?.content ?? task.description,
+          approvedSynthesis: synthesis?.content ?? task.description,
+          taskId,
+        },
+      );
+    } catch (error) {
+      await failStartedTask();
+      throw error;
+    }
+    if (!handled) {
+      await failStartedTask();
       throw new Error(`Could not route ${task.id}`);
     }
   }
