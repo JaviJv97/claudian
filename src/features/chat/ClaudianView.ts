@@ -981,6 +981,26 @@ export class ClaudianView extends ItemView {
         }] as const;
       })),
     );
+    const captureTaskWorkspaceSnapshot = async () => {
+      const paths = this.plugin.app.vault.getFiles()
+        .map(file => file.path)
+        .filter(path => (
+          !path.startsWith('.claudian/')
+          && !path.startsWith(`${this.plugin.app.vault.configDir}/`)
+          && !path.startsWith('.trash/')
+        ));
+      return captureCollaborationFileSnapshot(await Promise.all(paths.map(async path => {
+        const stat = await this.plugin.app.vault.adapter.stat(path);
+        return {
+          path,
+          mtime: stat?.mtime ?? -1,
+          size: stat?.size ?? -1,
+        };
+      })));
+    };
+    const taskWorkspaceBaseline = workflowTask
+      ? await captureTaskWorkspaceSnapshot()
+      : undefined;
     let fileBaseline = await captureSharedFileSnapshot();
     let fileContentBaseline = await captureSharedFileContentSnapshot();
     let activeDeliberationId: string | undefined;
@@ -1221,6 +1241,23 @@ export class ClaudianView extends ItemView {
         );
         if (executionEvent.delivery[task.ownerId]?.status !== 'completed') {
           return failTask(`${task.id} execution did not complete.`);
+        }
+        if (taskWorkspaceBaseline) {
+          const currentWorkspace = await captureTaskWorkspaceSnapshot();
+          const workspacePaths = [...new Set([
+            ...taskWorkspaceBaseline.keys(),
+            ...currentWorkspace.keys(),
+          ])];
+          const outsideScope = findChangedSharedFiles(
+            taskWorkspaceBaseline,
+            currentWorkspace,
+            workspacePaths,
+          ).filter(path => !isCollaborationPathInTaskScope(path, task.fileScopes));
+          if (outsideScope.length > 0) {
+            return failTask(
+              `${task.id} changed files outside its scope: ${outsideScope.join(', ')}`,
+            );
+          }
         }
         const ownerOutput = [...room.events].reverse().find(event => (
           event.workflow?.id === workflow.id
