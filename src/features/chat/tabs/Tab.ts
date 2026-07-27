@@ -57,6 +57,7 @@ import { NavigationSidebar } from '../ui/NavigationSidebar';
 import { StatusPanel } from '../ui/StatusPanel';
 import { autoResizeTextarea } from '../ui/textareaResize';
 import { recalculateUsageForModel } from '../utils/usageInfo';
+import { VoiceInputController } from '../voice/VoiceInputController';
 import { getTabProviderId } from './providerResolution';
 import { TabSession } from './TabSession';
 import type {
@@ -711,6 +712,7 @@ export function createTab(options: TabCreateOptions): TabData {
       contextUsageMeter: null,
       statusPanel: null,
       navigationSidebar: null,
+      voiceInputController: null,
     },
     dom,
     renderer: null,
@@ -814,6 +816,7 @@ export async function initializeTabService(
   if (
     tab.serviceInitialized
     && tab.service?.providerId === providerId
+    && tab.service.runtimeProfileId === conversation?.runtimeProfileId
     && !tab.runtimeSupervisor.isInvalidated
   ) {
     return;
@@ -833,6 +836,7 @@ export async function initializeTabService(
     const runtime = ProviderRegistry.createChatRuntime({
       plugin: plugin.providerHost,
       providerId,
+      runtimeProfileId: conversation?.runtimeProfileId,
     });
     service = runtime;
     unsubscribeReadyState = runtime.onReadyStateChange(() => {});
@@ -1034,6 +1038,30 @@ function initializeInputToolbar(
     getCapabilities: () => getTabCapabilities(tab, plugin),
     getSettings: () => getTabSettingsSnapshot(tab, plugin),
     getEnvironmentVariables: () => plugin.getActiveEnvironmentVariables(),
+    getModelScopeLabel: () => {
+      const conversation = tab.conversationId
+        ? plugin.getConversationSync(tab.conversationId)
+        : null;
+      const participantId = conversation?.collaboration?.participantId;
+      if (participantId) {
+        return participantId
+          .split('-')
+          .map(part => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+          .join(' ');
+      }
+      return ProviderRegistry.getProviderDisplayName(getTabProviderId(tab, plugin));
+    },
+    onCustomModelAdd: async (model: string) => {
+      const uiConfig = getTabChatUIConfig(tab, plugin);
+      if (!uiConfig.addCustomModel) {
+        throw new Error('This provider does not support custom model IDs');
+      }
+      let selectedModel = '';
+      await updateTabProviderSettings(tab, plugin, settings => {
+        selectedModel = uiConfig.addCustomModel!(model, settings);
+      });
+      return selectedModel;
+    },
     onModelChange: async (model: string) => {
       // For blank tabs, update draft model and derive provider
       if (tab.lifecycleState === 'blank') {
@@ -1190,6 +1218,7 @@ function initializeInputToolbar(
   tab.ui.mcpServerSelector = toolbarComponents.mcpServerSelector;
   tab.ui.permissionToggle = toolbarComponents.permissionToggle;
   tab.ui.serviceTierToggle = toolbarComponents.serviceTierToggle;
+  tab.ui.voiceInputController = new VoiceInputController(inputToolbar, dom.inputEl);
 
   tab.ui.mcpServerSelector.setMcpManager(getProviderMcpManager(getTabProviderId(tab, plugin)));
 
@@ -1646,7 +1675,12 @@ export function initializeTabControllers(
         syncSlashCommandDropdownForProvider(tab, plugin, getProviderCatalogConfig, conversation);
 
         // If the runtime already exists for the right provider, sync it passively
-        if (tab.service && tab.service.providerId === nextProviderId && conversation) {
+        if (
+          tab.service
+          && tab.service.providerId === nextProviderId
+          && tab.service.runtimeProfileId === conversation?.runtimeProfileId
+          && conversation
+        ) {
           const hasMessages = conversation.messages.length > 0;
           const externalContextPaths = hasMessages
             ? conversation.externalContextPaths || []
@@ -1710,6 +1744,11 @@ export function initializeTabControllers(
     getAgentService: () => tab.service,
     getSubagentManager: () => services.subagentManager,
     getTabProviderId: () => getTabProviderId(tab, plugin),
+    routeCollaborationMessage: (component as Partial<TabManagerViewHost>).routeCollaborationMessage
+      ? (content, images) => (
+        (component as TabManagerViewHost).routeCollaborationMessage!(tab.id, content, images)
+      )
+      : undefined,
     turnOwner: tab.session,
     ensureServiceInitialized,
     openConversation,
@@ -1998,6 +2037,8 @@ export async function destroyTab(tab: TabData): Promise<void> {
   tab.ui.statusPanel = null;
   tab.ui.navigationSidebar?.destroy();
   tab.ui.navigationSidebar = null;
+  tab.ui.voiceInputController?.destroy();
+  tab.ui.voiceInputController = null;
 
   for (const cleanup of tab.dom.eventCleanups) {
     cleanup();

@@ -1,21 +1,50 @@
 /* Model selector */
 .claudian-model-selector {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .claudian-model-btn {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
+  border: 0;
   border-radius: 4px;
+  background: transparent;
   cursor: pointer;
   color: var(--claudian-brand);
   font-size: 12px;
 }
 
+.claudian-model-btn:hover,
+.claudian-model-btn:focus-visible {
+  background: var(--background-modifier-hover);
+  outline: none;
+}
+
+.claudian-model-scope {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claudian-model-scope::after {
+  margin-inline: 4px 1px;
+  color: var(--text-faint);
+  content: "·";
+}
+
 .claudian-model-label {
+  overflow: hidden;
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .claudian-model-chevron {
@@ -42,6 +71,7 @@
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.15);
   z-index: 1000;
   width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
   padding: 4px;
   opacity: 0;
   visibility: hidden;
@@ -51,6 +81,22 @@
 .claudian-model-selector:hover .claudian-model-dropdown {
   opacity: 1;
   visibility: visible;
+}
+
+.claudian-model-selector:focus-within .claudian-model-dropdown {
+  opacity: 1;
+  visibility: visible;
+}
+
+.claudian-model-scope-heading {
+  overflow: hidden;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .claudian-model-group {
@@ -90,13 +136,51 @@
   white-space: nowrap;
 }
 
+.claudian-model-option > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .claudian-model-option:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
+}
+
+.claudian-model-option:focus-visible {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
 }
 
 .claudian-model-option.selected {
   background: rgba(var(--claudian-brand-rgb), 0.15);
   color: var(--claudian-brand);
   font-weight: 500;
+}
+
+.claudian-model-custom-form {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.claudian-model-custom-input {
+  width: min(170px, 100%);
+  min-width: 0;
+  padding: 4px 6px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+}
+
+.claudian-model-custom-input[aria-invalid="true"] {
+  border-color: var(--text-error);
+}
+
+.claudian-model-custom-submit {
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
 }

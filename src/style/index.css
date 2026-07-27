@@ -28,6 +28,7 @@
 @import "./toolbar/service-tier-toggle.css";
 @import "./toolbar/external-context.css";
 @import "./toolbar/mcp-selector.css";
+@import "./toolbar/voice-input.css";
 
 /* Features */
 @import "./features/file-context.css";
@@ -41,11 +42,14 @@
 @import "./features/resume-session.css";
 @import "./features/ask-user-question.css";
 @import "./features/plan-mode.css";
+@import "./features/collaboration.css";
+@import "./features/collaboration-work-queue.css";
 
 /* Modals */
 @import "./modals/instruction.css";
 @import "./modals/mcp-modal.css";
 @import "./modals/fork-target.css";
+@import "./modals/usage-dashboard.css";
 
 /* Settings */
 @import "./settings/base.css";

@@ -230,9 +230,14 @@ export class TabManager implements TabManagerInterface {
         },
         onConversationIdChanged: (conversationId) => {
           this.bumpTabCommandContextRevision(tab.id);
+          const previousConversationId = tab.conversationId;
           // Sync tab.conversationId when conversation is lazily created
           tab.conversationId = conversationId;
-          this.callbacks.onTabConversationChanged?.(tab.id, conversationId);
+          this.callbacks.onTabConversationChanged?.(
+            tab.id,
+            conversationId,
+            previousConversationId,
+          );
           this.notifyPersistedStateChanged();
         },
         onRuntimeInstalled: (runtime) => this.bindRuntimeCommandSubscription(tab, runtime),

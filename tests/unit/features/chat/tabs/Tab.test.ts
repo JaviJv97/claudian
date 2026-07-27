@@ -794,6 +794,33 @@ describe('Tab - Service Initialization', () => {
       }));
     });
 
+    it('passes the conversation runtime profile to the provider runtime', async () => {
+      const createChatRuntimeSpy = jest.spyOn(ProviderRegistry, 'createChatRuntime');
+      createChatRuntimeSpy.mockReturnValue(createMockClaudianService() as any);
+      const conversation = {
+        id: 'conv-company',
+        providerId: 'claude',
+        runtimeProfileId: 'company',
+        title: 'Claude Company',
+        messages: [],
+        sessionId: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const plugin = createMockPlugin({
+        getConversationById: jest.fn().mockResolvedValue(conversation),
+      });
+      const tab = createTab(createMockOptions({ plugin, conversation }));
+
+      await initializeTabService(tab, plugin, createMockMcpManager());
+
+      expect(createChatRuntimeSpy).toHaveBeenCalledWith(expect.objectContaining({
+        plugin,
+        providerId: 'claude',
+        runtimeProfileId: 'company',
+      }));
+    });
+
     it('should recreate the runtime when the conversation provider changes', async () => {
       const createChatRuntimeSpy = jest.spyOn(ProviderRegistry, 'createChatRuntime');
       const oldService = createMockClaudianService({ providerId: 'claude' });

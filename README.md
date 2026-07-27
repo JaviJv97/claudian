@@ -8,6 +8,23 @@
 
 An Obsidian plugin that embeds AI coding agents (Claude Code, Codex, Grok, Opencode, Pi, and more to come) in your vault. Your vault becomes the agent's working directory — file read/write, search, bash, and multi-step workflows all work out of the box.
 
+> **Fork preview: Claude + Codex collaboration rooms**
+>
+> Run **Claudian: Start Claude + Codex collaboration** from the Obsidian command
+> palette to create linked Claude and Codex sessions. Messages sent from either
+> linked tab go to both agents by default. Prefix a message with `@claude` or
+> `@codex` to address one participant, or use `@all` explicitly. Collaboration
+> membership and its shared event log are stored in the vault so the room
+> survives restart. The room presents one attributed timeline with live agent
+> output, image attachments, independent delivery states and stop/retry
+> controls. Any agent response can be handed to the other agent for review.
+> Rooms also support configurable multi-cycle round tables, deterministic automatic
+> routing, selectable starter and synthesizer roles, persisted facilitator
+> selection, and direct
+> Active/Preserve/Muted participant controls. See
+> [`docs/COLLABORATION-ROUTING.md`](docs/COLLABORATION-ROUTING.md) and the
+> [`routing milestone handoff`](docs/COLLABORATION-ROUTING-MILESTONE.md).
+
 ## Features & Usage
 
 Open the chat sidebar from the ribbon icon or command palette. Select text and use the hotkey for inline edit. Everything works like your familiar coding agent, Claude Code, Codex, Grok, Opencode, and Pi — talk to the agent, and it reads, writes, edits, and searches files in your vault.
@@ -46,9 +63,10 @@ Or install directly from the [community plugin page](https://community.obsidian.
 ### From GitHub Release
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/YishenTu/claudian/releases/latest)
-2. Create a folder called `claudian` in your vault's plugins folder:
+2. Create a folder called `realclaudian` in your vault's plugins folder. The
+   folder name must match the `id` in `manifest.json`:
    ```
-   /path/to/vault/.obsidian/plugins/claudian/
+   /path/to/vault/.obsidian/plugins/realclaudian/
    ```
 3. Copy the downloaded files into the `claudian` folder
 4. Enable the plugin in Obsidian:
@@ -73,6 +91,47 @@ Or install directly from the [community plugin page](https://community.obsidian.
    - Settings → Community plugins → Enable "Claudian"
 
 ### Development
+
+Account identity and cross-device setup are documented in
+[`docs/ACCOUNT-PROFILES.md`](docs/ACCOUNT-PROFILES.md).
+
+List the Obsidian vaults registered on the current computer:
+
+```bash
+npm run vault:list
+```
+
+Install or update the current build in one vault:
+
+```bash
+# Windows
+npm run vault:install -- "C:\path\to\vault"
+
+# Linux
+npm run vault:install -- "/home/user/path/to/vault"
+```
+
+If an agent created the vault content before the folder was ever opened in
+Obsidian, explicitly initialize its `.obsidian` configuration while installing:
+
+```bash
+npm run vault:install -- --initialize "/path/to/content-only-vault"
+```
+
+Update every vault currently registered with Obsidian:
+
+```bash
+npm run vault:update:registered
+```
+
+The installer uses the manifest ID for the destination folder, preserves
+`data.json` and vault `.claudian` state, backs up replaced build artifacts, and
+enables the plugin without removing other enabled plugins. Add
+`-- --include-unregistered` to `vault:list` to include archived and nested
+vaults found under the current user's home directory. Registered-vault
+discovery supports Windows `%APPDATA%\obsidian\obsidian.json` and Linux
+`$XDG_CONFIG_HOME/obsidian/obsidian.json` (falling back to
+`~/.config/obsidian/obsidian.json`).
 
 ```bash
 # Watch mode

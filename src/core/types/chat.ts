@@ -1,3 +1,4 @@
+import type { CollaborationMembership } from './collaboration';
 import type { SDKToolUseResult } from './diff';
 import type { ProviderId } from './provider';
 import type { SubagentMode, ToolCallInfo, ToolProviderPayload } from './tools';
@@ -65,6 +66,8 @@ export interface ChatMessage {
 export interface Conversation {
   id: string;
   providerId: ProviderId;
+  /** Provider-owned runtime profile selector, such as a separate authenticated account. */
+  runtimeProfileId?: string;
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -75,6 +78,8 @@ export interface Conversation {
   selectedModel?: string;
   /** Opaque provider-owned state bag (session tracking, fork metadata, etc.). */
   providerState?: Record<string, unknown>;
+  /** Provider-neutral membership in a shared multi-agent collaboration room. */
+  collaboration?: CollaborationMembership;
   messages: ChatMessage[];
   currentNote?: string;
   /** Session-specific external context paths (directories with full access). Resets on new session. */
@@ -111,6 +116,8 @@ export interface ConversationMeta {
 export interface SessionMetadata {
   id: string;
   providerId?: ProviderId;
+  /** Provider-owned runtime profile selector. */
+  runtimeProfileId?: string;
   title: string;
   titleGenerationStatus?: 'pending' | 'success' | 'failed';
   createdAt: number;
@@ -122,6 +129,8 @@ export interface SessionMetadata {
   selectedModel?: string;
   /** Opaque provider-owned state bag. */
   providerState?: Record<string, unknown>;
+  /** Provider-neutral membership in a shared multi-agent collaboration room. */
+  collaboration?: CollaborationMembership;
   currentNote?: string;
   externalContextPaths?: string[];
   enabledMcpServers?: string[];

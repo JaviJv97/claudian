@@ -15,6 +15,29 @@ export const CLAUDE_SAFE_MODES = ['acceptEdits', 'auto', 'default'] as const;
 export type ClaudeSafeMode = typeof CLAUDE_SAFE_MODES[number];
 export type ClaudeSettingSource = 'user' | 'project' | 'local';
 
+export interface ClaudeCollaborationProfile {
+  id: string;
+  label: string;
+  configDir: string;
+  enabled: boolean;
+}
+
+export const DEFAULT_CLAUDE_COLLABORATION_PROFILES: readonly ClaudeCollaborationProfile[] =
+  Object.freeze([
+    Object.freeze({
+      id: 'personal',
+      label: 'Claude Personal',
+      configDir: '~/.claude-personal',
+      enabled: true,
+    }),
+    Object.freeze({
+      id: 'company',
+      label: 'Claude Company',
+      configDir: '~/.claude',
+      enabled: true,
+    }),
+  ]);
+
 export interface ClaudeProviderSettings {
   safeMode: ClaudeSafeMode;
   cliPath: string;
@@ -28,6 +51,7 @@ export interface ClaudeProviderSettings {
   titleModelEnvironmentType: ClaudeModelEnvironmentType | '';
   environmentVariables: string;
   environmentHash: string;
+  collaborationProfiles: ClaudeCollaborationProfile[];
 }
 
 export const DEFAULT_CLAUDE_PROVIDER_SETTINGS: Readonly<ClaudeProviderSettings> = Object.freeze({
@@ -43,7 +67,31 @@ export const DEFAULT_CLAUDE_PROVIDER_SETTINGS: Readonly<ClaudeProviderSettings> 
   titleModelEnvironmentType: '',
   environmentVariables: '',
   environmentHash: '',
+  collaborationProfiles: DEFAULT_CLAUDE_COLLABORATION_PROFILES.map(profile => ({ ...profile })),
 });
+
+const SAFE_PROFILE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function normalizeClaudeCollaborationProfiles(
+  value: unknown,
+): ClaudeCollaborationProfile[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_CLAUDE_COLLABORATION_PROFILES.map(profile => ({ ...profile }));
+  }
+  const seen = new Set<string>();
+  const profiles: ClaudeCollaborationProfile[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    const entry = candidate as Record<string, unknown>;
+    const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+    const label = typeof entry.label === 'string' ? entry.label.trim() : '';
+    const configDir = typeof entry.configDir === 'string' ? entry.configDir.trim() : '';
+    if (!SAFE_PROFILE_ID_PATTERN.test(id) || seen.has(id) || !label || !configDir) continue;
+    seen.add(id);
+    profiles.push({ id, label, configDir, enabled: entry.enabled !== false });
+  }
+  return profiles;
+}
 
 function normalizeHostnameCliPaths(value: unknown): HostnameCliPaths {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -120,6 +168,7 @@ export function getClaudeProviderSettings(
     environmentHash: (config.environmentHash as string | undefined)
       ?? (settings.lastEnvHash as string | undefined)
       ?? DEFAULT_CLAUDE_PROVIDER_SETTINGS.environmentHash,
+    collaborationProfiles: normalizeClaudeCollaborationProfiles(config.collaborationProfiles),
   };
 }
 
@@ -142,6 +191,9 @@ export function updateClaudeProviderSettings(
     safeMode: 'safeMode' in updates
       ? normalizeClaudeSafeMode(updates.safeMode) ?? current.safeMode
       : current.safeMode,
+    collaborationProfiles: 'collaborationProfiles' in updates
+      ? normalizeClaudeCollaborationProfiles(updates.collaborationProfiles)
+      : current.collaborationProfiles,
   };
   setProviderConfig(settings, 'claude', next);
   return next;

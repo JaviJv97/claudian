@@ -15,11 +15,14 @@ import type {
   ChatTurnRequest,
   ExitPlanModeCallback,
   PreparedChatTurn,
+  ProviderQuotaSnapshot,
   SessionUpdateResult,
 } from './types';
 
 export interface ChatRuntime {
   readonly providerId: ProviderId;
+  readonly runtimeProfileId?: string;
+  readonly accountBindingFingerprint?: string;
 
   getCapabilities(): Readonly<ProviderCapabilities>;
   /** Loads provider-owned state required for synchronous turn encoding. Must be idempotent. */
@@ -52,6 +55,8 @@ export interface ChatRuntime {
     listener: (commands: readonly SlashCommand[]) => void,
   ): () => void;
   getAuxiliaryModel?(): string | null;
+  /** Reads provider account quota without submitting a model turn. */
+  getQuotaSnapshot?(): Promise<ProviderQuotaSnapshot>;
   cleanup(): void;
   previewRewind?(
     userMessageId: string,

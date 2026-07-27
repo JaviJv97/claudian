@@ -83,6 +83,7 @@ export class ConversationRepository {
 
   async create(options?: {
     providerId?: ProviderId;
+    runtimeProfileId?: string;
     sessionId?: string;
     selectedModel?: string;
   }): Promise<Conversation> {
@@ -98,6 +99,7 @@ export class ConversationRepository {
     const conversation: Conversation = {
       id: sessionId ?? this.generateId(),
       providerId,
+      runtimeProfileId: options?.runtimeProfileId,
       title: this.generateDefaultTitle(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -145,7 +147,7 @@ export class ConversationRepository {
         .deleteConversationSession(
           conversation,
           vaultPath,
-          this.getHistoryPathContext(conversation.providerId, vaultPath),
+          this.getHistoryPathContext(conversation, vaultPath),
         );
     }
 
@@ -172,7 +174,7 @@ export class ConversationRepository {
         conversation,
         vaultPath,
         missingProviderSessionId,
-        this.getHistoryPathContext(conversation.providerId, vaultPath),
+        this.getHistoryPathContext(conversation, vaultPath),
       );
       if (resolution === 'delete') {
         await this.delete(id, { deleteProviderSession: false });
@@ -335,7 +337,7 @@ export class ConversationRepository {
     if (!historyService.getConversationSessionAvailability) return;
 
     const vaultPath = this.deps.getVaultPath();
-    const pathContext = this.getHistoryPathContext(conversation.providerId, vaultPath);
+    const pathContext = this.getHistoryPathContext(conversation, vaultPath);
     let availability;
     try {
       availability = await historyService.getConversationSessionAvailability(
@@ -385,19 +387,24 @@ export class ConversationRepository {
       .hydrateConversationHistory(
         conversation,
         vaultPath,
-        this.getHistoryPathContext(conversation.providerId, vaultPath),
+        this.getHistoryPathContext(conversation, vaultPath),
       );
   }
 
   private getHistoryPathContext(
-    providerId: ProviderId,
+    conversation: Pick<Conversation, 'providerId' | 'runtimeProfileId'>,
     vaultPath: string | null = this.deps.getVaultPath(),
   ): ProviderHistoryPathContext {
     const settings = this.deps.getSettings();
     return {
       environment: {
         ...process.env,
-        ...getRuntimeEnvironmentVariables(settings, providerId),
+        ...getRuntimeEnvironmentVariables(settings, conversation.providerId),
+        ...ProviderRegistry.resolveRuntimeProfileEnvironment(
+          conversation.providerId,
+          conversation.runtimeProfileId,
+          settings,
+        ),
       },
       hostPlatform: process.platform,
       settings,

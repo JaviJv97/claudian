@@ -1,5 +1,8 @@
+import * as fs from 'node:fs';
+
 import { getProviderConfig } from '../../core/providers/providerConfig';
 import type { ProviderModule } from '../../core/providers/types';
+import { expandHomePath } from '../../utils/path';
 import {
   claudeWorkspaceRegistration,
   getClaudeWorkspaceServices,
@@ -8,6 +11,7 @@ import { InlineEditService as ClaudeInlineEditService } from './auxiliary/Claude
 import { InstructionRefineService as ClaudeInstructionRefineService } from './auxiliary/ClaudeInstructionRefineService';
 import { TitleGenerationService as ClaudeTitleGenerationService } from './auxiliary/ClaudeTitleGenerationService';
 import { CLAUDE_PROVIDER_CAPABILITIES } from './capabilities';
+import { resolveClaudeRuntimeProfileEnvironment } from './config/ClaudeRuntimeProfile';
 import { claudeSettingsReconciler } from './env/ClaudeSettingsReconciler';
 import { ClaudeConversationHistoryService } from './history/ClaudeConversationHistoryService';
 import { ClaudianService as ClaudeChatRuntime } from './runtime/ClaudeChatRuntime';
@@ -25,6 +29,25 @@ export const claudeProviderRegistration: ProviderModule = {
   isEnabled: () => true,
   capabilities: CLAUDE_PROVIDER_CAPABILITIES,
   environmentKeyPatterns: [/^ANTHROPIC_/i, /^CLAUDE_/i],
+  resolveRuntimeProfileEnvironment: resolveClaudeRuntimeProfileEnvironment,
+  getRuntimeProfiles: (settings) => getClaudeProviderSettings(settings).collaborationProfiles
+    .filter(profile => profile.enabled)
+    .map((profile) => {
+      const configDir = expandHomePath(profile.configDir);
+      const available = (() => {
+        try {
+          return fs.statSync(configDir).isDirectory();
+        } catch {
+          return false;
+        }
+      })();
+      return {
+        id: profile.id,
+        label: profile.label,
+        available,
+        unavailableReason: available ? undefined : `Directory not found: ${profile.configDir}`,
+      };
+    }),
   chatUIConfig: claudeChatUIConfig,
   settingsReconciler: claudeSettingsReconciler,
   settingsStorage: {
@@ -48,7 +71,7 @@ export const claudeProviderRegistration: ProviderModule = {
       return removedLegacy1MSettings;
     },
   },
-  createRuntime: ({ plugin }) => {
+  createRuntime: ({ plugin, runtimeProfileId }) => {
     const workspace = getClaudeWorkspaceServices();
     if (!workspace?.mcpManager) {
       throw new Error('Claude workspace services are not initialized.');
@@ -58,6 +81,7 @@ export const claudeProviderRegistration: ProviderModule = {
       mcpManager: workspace.mcpManager,
       pluginManager: workspace.pluginManager,
       agentManager: workspace.agentManager,
+      runtimeProfileId,
     });
   },
   createTitleGenerationService: (plugin) => new ClaudeTitleGenerationService(plugin),

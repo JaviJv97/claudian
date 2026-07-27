@@ -41,6 +41,7 @@ import type {
 } from './core/providers/types';
 import type { AppTabManagerState } from './core/providers/types';
 import { DEFAULT_CHAT_PROVIDER_ID } from './core/providers/types';
+import { ClaudeProcessRegistry } from './core/runtime/ClaudeProcessRegistry';
 import type {
   ClaudianSettings,
   Conversation,
@@ -128,6 +129,7 @@ export default class ClaudianPlugin extends Plugin {
   private sessionMetadataLoadTimer: number | null = null;
   private remainingSessionMetadataLoad: Promise<void> | null = null;
   private isUnloading = false;
+  private unsubscribeClaudeProcessHealth: (() => void) | null = null;
 
   async onload() {
     StartupProfiler.startOnload();
@@ -238,6 +240,57 @@ export default class ClaudianPlugin extends Plugin {
       });
 
       this.addCommand({
+        id: 'start-claude-codex-collaboration',
+        name: 'Start collaboration room',
+        callback: async () => {
+          const view = await this.ensureViewOpen();
+          await view?.startClaudeCodexCollaboration();
+        },
+      });
+
+      this.addCommand({
+        id: 'archive-current-collaboration',
+        name: 'Archive current collaboration room',
+        callback: async () => {
+          await this.getView()?.archiveCurrentCollaboration();
+        },
+      });
+
+      this.addCommand({
+        id: 'export-current-collaboration-room',
+        name: 'Export current collaboration room for another computer',
+        callback: async () => {
+          await this.getView()?.exportCurrentCollaborationRoom();
+        },
+      });
+
+      this.addCommand({
+        id: 'import-latest-portable-collaboration-room',
+        name: 'Import latest portable collaboration room',
+        callback: async () => {
+          const view = await this.ensureViewOpen();
+          await view?.importLatestPortableCollaborationRoom();
+        },
+      });
+
+      this.addCommand({
+        id: 'reopen-latest-collaboration',
+        name: 'Reopen latest archived collaboration room',
+        callback: async () => {
+          const view = await this.ensureViewOpen();
+          await view?.reopenLatestCollaboration();
+        },
+      });
+
+      this.addCommand({
+        id: 'replace-current-collaboration-participant',
+        name: 'Replace current collaboration participant',
+        callback: async () => {
+          await this.getView()?.replaceCurrentCollaborationParticipant();
+        },
+      });
+
+      this.addCommand({
         id: 'close-current-tab',
         name: 'Close current tab',
         checkCallback: (checking: boolean) => {
@@ -266,6 +319,44 @@ export default class ClaudianPlugin extends Plugin {
         },
       });
 
+      this.addCommand({
+        id: 'copy-claude-runtime-diagnostics',
+        name: 'Copy Claude runtime diagnostics',
+        callback: async () => {
+          await navigator.clipboard.writeText(ClaudeProcessRegistry.describe());
+          new Notice('Claude runtime diagnostics copied to clipboard.');
+        },
+      });
+
+      this.addCommand({
+        id: 'cleanup-stopped-claude-runtimes',
+        name: 'Clean up stopped Claude runtimes',
+        callback: () => {
+          const cleaned = ClaudeProcessRegistry.cleanupStoppedGroups();
+          new Notice(
+            cleaned > 0
+              ? `Force-cleaned ${cleaned} stopped Claude runtime group${cleaned === 1 ? '' : 's'}.`
+              : 'No stopped Claude runtime groups needed cleanup.',
+          );
+        },
+      });
+
+      let previousClaudeHealth = ClaudeProcessRegistry.getSnapshot().health;
+      this.unsubscribeClaudeProcessHealth?.();
+      this.unsubscribeClaudeProcessHealth = ClaudeProcessRegistry.subscribe((snapshot) => {
+        if (snapshot.health === previousClaudeHealth) return;
+        previousClaudeHealth = snapshot.health;
+        if (snapshot.health === 'warning') {
+          new Notice('Claude runtimes are using more than 3 gigabytes of memory.');
+        } else if (snapshot.health === 'paused') {
+          new Notice('Claude background work paused: runtimes exceed 4 gigabytes.');
+        } else if (snapshot.health === 'critical') {
+          new Notice('Claude safety limit reached: new runtimes are blocked above 5 gigabytes.');
+        } else {
+          new Notice('Claude runtime memory returned to a healthy level.');
+        }
+      });
+
       this.addSettingTab(new ClaudianSettingTab(this.app, this));
       this.scheduleRemainingSessionMetadataLoad();
     } finally {
@@ -275,6 +366,9 @@ export default class ClaudianPlugin extends Plugin {
 
   onunload(): void {
     this.isUnloading = true;
+    this.unsubscribeClaudeProcessHealth?.();
+    this.unsubscribeClaudeProcessHealth = null;
+    ClaudeProcessRegistry.terminateAll();
     if (this.sessionMetadataLoadTimer !== null) {
       window.clearTimeout(this.sessionMetadataLoadTimer);
       this.sessionMetadataLoadTimer = null;
@@ -742,6 +836,7 @@ export default class ClaudianPlugin extends Plugin {
     return {
       id: meta.id,
       providerId: meta.providerId ?? DEFAULT_CHAT_PROVIDER_ID,
+      runtimeProfileId: meta.runtimeProfileId,
       title: meta.title,
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
@@ -749,6 +844,7 @@ export default class ClaudianPlugin extends Plugin {
       sessionId: meta.sessionId !== undefined ? meta.sessionId : meta.id,
       selectedModel: meta.selectedModel,
       providerState: meta.providerState,
+      collaboration: meta.collaboration,
       messages: [],
       currentNote: meta.currentNote,
       externalContextPaths: meta.externalContextPaths,
@@ -1161,6 +1257,7 @@ export default class ClaudianPlugin extends Plugin {
 
   async createConversation(options?: {
     providerId?: ProviderId;
+    runtimeProfileId?: string;
     sessionId?: string;
     selectedModel?: string;
   }): Promise<Conversation> {

@@ -5,6 +5,7 @@ import type { ProviderCommandDiscoveryController } from '../../../core/providers
 import type { ProviderCommandEntry } from '../../../core/providers/commands/ProviderCommandEntry';
 import type { InstructionRefineService, ProviderId, TitleGenerationService } from '../../../core/providers/types';
 import type { ChatRuntime } from '../../../core/runtime/ChatRuntime';
+import type { ImageAttachment } from '../../../core/types';
 import type { SlashCommandDropdown } from '../../../shared/components/SlashCommandDropdown';
 import type { BrowserSelectionController } from '../controllers/BrowserSelectionController';
 import type { CanvasSelectionController } from '../controllers/CanvasSelectionController';
@@ -33,6 +34,7 @@ import type {
 import type { InstructionModeManager } from '../ui/InstructionModeManager';
 import type { NavigationSidebar } from '../ui/NavigationSidebar';
 import type { StatusPanel } from '../ui/StatusPanel';
+import type { VoiceInputController } from '../voice/VoiceInputController';
 import type { RuntimeSupervisor } from './RuntimeSupervisor';
 import type { TabSession } from './TabSession';
 
@@ -71,6 +73,13 @@ export interface TabManagerViewHost extends Component {
 
   /** Gets view-owned elements that should preserve active tab selection context. */
   getSharedSelectionFocusScopeEls?(): HTMLElement[];
+
+  /** Routes a user turn across a linked multi-provider collaboration room. */
+  routeCollaborationMessage?(
+    originTabId: TabId,
+    content: string,
+    images?: ImageAttachment[],
+  ): Promise<boolean>;
 }
 
 /**
@@ -143,6 +152,7 @@ export interface TabUIComponents {
   contextUsageMeter: ContextUsageMeter | null;
   statusPanel: StatusPanel | null;
   navigationSidebar: NavigationSidebar | null;
+  voiceInputController: VoiceInputController | null;
 }
 
 /**
@@ -302,7 +312,11 @@ export interface TabManagerCallbacks {
   onTabAttentionChanged?: (tabId: TabId, needsAttention: boolean) => void;
 
   /** Called when a tab's conversation changes (loaded different conversation in same tab). */
-  onTabConversationChanged?: (tabId: TabId, conversationId: string | null) => void;
+  onTabConversationChanged?: (
+    tabId: TabId,
+    conversationId: string | null,
+    previousConversationId: string | null,
+  ) => void;
 
   /** Called when the active provider changes within a tab (blank tab model selection). */
   onTabProviderChanged?: (tabId: TabId, providerId: ProviderId) => void;
@@ -316,6 +330,8 @@ export interface TabBarItem {
   /** 1-based index for display. */
   index: number;
   title: string;
+  /** Optional persistent label used instead of the compact numeric index. */
+  badgeLabel?: string;
   providerId: ProviderId;
   isActive: boolean;
   isStreaming: boolean;

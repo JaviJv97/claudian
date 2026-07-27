@@ -44,6 +44,14 @@ export const DEFAULT_CHAT_PROVIDER_ID = 'claude' as const satisfies ProviderId;
 export interface CreateChatRuntimeOptions {
   plugin: ProviderHost;
   providerId?: ProviderId;
+  runtimeProfileId?: string;
+}
+
+export interface ProviderRuntimeProfile {
+  id: string;
+  label: string;
+  available: boolean;
+  unavailableReason?: string;
 }
 
 /**
@@ -61,9 +69,14 @@ export interface ProviderRegistration {
   setEnabled?: (settings: Record<string, unknown>, enabled: boolean) => void;
   capabilities: ProviderCapabilities;
   environmentKeyPatterns?: RegExp[];
+  resolveRuntimeProfileEnvironment?: (
+    profileId?: string,
+    settings?: Record<string, unknown>,
+  ) => Record<string, string>;
+  getRuntimeProfiles?: (settings: Record<string, unknown>) => ProviderRuntimeProfile[];
   chatUIConfig: ProviderChatUIConfig;
   settingsReconciler: ProviderSettingsReconciler;
-  createRuntime: (options: Omit<CreateChatRuntimeOptions, 'providerId'>) => ChatRuntime;
+  createRuntime: (options: CreateChatRuntimeOptions) => ChatRuntime;
   createTitleGenerationService: (plugin: ProviderHost) => TitleGenerationService;
   createInstructionRefineService: (plugin: ProviderHost) => InstructionRefineService;
   createInlineEditService: (plugin: ProviderHost) => InlineEditService;
@@ -285,6 +298,13 @@ export interface ProviderModeSelectorConfig {
 export interface ProviderChatUIConfig {
   /** Model options for the selector dropdown. Provider extracts what it needs from the settings bag. */
   getModelOptions(settings: Record<string, unknown>): ProviderUIOption[];
+
+  /**
+   * Adds an opaque provider model ID to the selector catalog.
+   * Providers that implement this expose inline custom-model entry in chat.
+   * Returns the normalized selector value that should become active.
+   */
+  addCustomModel?(model: string, settings: unknown): string;
 
   /** Semantic default model, independent from selector display order. */
   getDefaultModel?(settings: Record<string, unknown>): string | null;

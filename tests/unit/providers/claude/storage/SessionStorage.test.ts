@@ -285,6 +285,30 @@ describe('SessionStorage', () => {
   });
 
   describe('toSessionMetadata - round trip', () => {
+    it('round-trips the runtime profile without storing credentials', async () => {
+      const conversation: Conversation = {
+        id: 'conv-company-profile',
+        providerId: 'claude',
+        runtimeProfileId: 'company',
+        title: 'Company profile',
+        createdAt: 1700000000,
+        updatedAt: 1700001000,
+        sessionId: null,
+        messages: [],
+      };
+
+      const metadata = storage.toSessionMetadata(conversation);
+      await storage.saveMetadata(metadata);
+      const writtenContent = mockAdapter.write.mock.calls[0][1];
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(writtenContent);
+
+      const loaded = await storage.loadMetadata('conv-company-profile');
+
+      expect(loaded?.runtimeProfileId).toBe('company');
+      expect(writtenContent).not.toContain('credentials');
+    });
+
     it('round-trips providerState through save and load', async () => {
       const conversation: Conversation = {
         id: 'conv-roundtrip',

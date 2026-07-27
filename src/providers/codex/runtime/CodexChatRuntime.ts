@@ -25,6 +25,7 @@ import type {
   ChatTurnRequest,
   ExitPlanModeCallback,
   PreparedChatTurn,
+  ProviderQuotaSnapshot,
   SessionUpdateResult,
 } from '../../../core/runtime/types';
 import type { ChatMessage, Conversation, ForkSource, SlashCommand, StreamChunk } from '../../../core/types';
@@ -73,6 +74,10 @@ import type {
 import { CodexDynamicToolRegistry } from './CodexDynamicToolRegistry';
 import type { CodexLaunchSpec } from './codexLaunchTypes';
 import { CodexNotificationRouter } from './CodexNotificationRouter';
+import {
+  type CodexAccountRateLimitsResponse,
+  mapCodexRateLimitsToQuotaSnapshot,
+} from './CodexQuotaSnapshot';
 import { CodexRpcTransport } from './CodexRpcTransport';
 import { type CodexRuntimeContext, createCodexRuntimeContext } from './CodexRuntimeContext';
 import { CodexServerRequestRouter } from './CodexServerRequestRouter';
@@ -179,6 +184,17 @@ export class CodexChatRuntime implements ChatRuntime {
 
   getCapabilities(): Readonly<ProviderCapabilities> {
     return CODEX_PROVIDER_CAPABILITIES;
+  }
+
+  async getQuotaSnapshot(): Promise<ProviderQuotaSnapshot> {
+    if (!this.transport) {
+      throw new Error('Codex runtime must be ready before refreshing quota.');
+    }
+    const response = await this.transport.request<CodexAccountRateLimitsResponse>(
+      'account/rateLimits/read',
+      undefined,
+    );
+    return mapCodexRateLimitsToQuotaSnapshot(response);
   }
 
   prepareTurn(request: ChatTurnRequest): PreparedChatTurn {

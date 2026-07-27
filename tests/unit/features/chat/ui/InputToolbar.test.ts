@@ -78,6 +78,7 @@ function filterVisibleModels(
 function createMockUIConfig() {
   return {
     getProviderIcon: jest.fn().mockReturnValue(null),
+    addCustomModel: jest.fn().mockImplementation((model: string) => model),
     getModelOptions: jest.fn().mockImplementation((settings: {
       enableOpus1M?: boolean;
       enableSonnet1M?: boolean;
@@ -153,6 +154,7 @@ function createMockUIConfig() {
 function createMockCallbacks(overrides: Record<string, any> = {}) {
   return {
     onModelChange: jest.fn().mockResolvedValue(undefined),
+    onCustomModelAdd: jest.fn().mockImplementation(async (model: string) => model),
     onModeChange: jest.fn().mockResolvedValue(undefined),
     onThinkingBudgetChange: jest.fn().mockResolvedValue(undefined),
     onEffortLevelChange: jest.fn().mockResolvedValue(undefined),
@@ -208,6 +210,42 @@ describe('ModelSelector', () => {
     const label = btn?.querySelector('.claudian-model-label');
     expect(label).not.toBeNull();
     expect(label?.textContent).toBe('Sonnet');
+  });
+
+  it('identifies which participant owns the visible model selector', () => {
+    selector = new ModelSelector(parentEl, {
+      ...callbacks,
+      getModelScopeLabel: jest.fn().mockReturnValue('Claude Company'),
+    });
+
+    const btn = parentEl.querySelectorAll('.claudian-model-btn').at(-1);
+    expect(btn?.querySelector('.claudian-model-scope')?.textContent)
+      .toBe('Claude Company');
+    expect(btn?.getAttribute('aria-label')).toBe('Claude Company model: Sonnet');
+    expect(btn?.getAttribute('title')).toBe('Model for Claude Company: Sonnet');
+    expect(
+      parentEl.querySelectorAll('.claudian-model-dropdown').at(-1)
+        ?.querySelector('.claudian-model-scope-heading')?.textContent,
+    ).toBe('Models for Claude Company');
+  });
+
+  it('exposes the model picker and options to keyboard navigation', async () => {
+    const btn = parentEl.querySelector('.claudian-model-btn');
+    const sonnet = parentEl.querySelectorAll('.claudian-model-option')
+      .find((option: any) => option.children[0]?.textContent === 'Sonnet');
+
+    expect(btn?.tagName).toBe('BUTTON');
+    expect(btn?.getAttribute('aria-haspopup')).toBe('listbox');
+    expect(sonnet?.getAttribute('role')).toBe('option');
+    expect(sonnet?.getAttribute('tabindex')).toBe('0');
+    expect(sonnet?.getAttribute('aria-selected')).toBe('true');
+
+    await sonnet?.dispatchEvent('keydown', {
+      key: 'Enter',
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    });
+    expect(callbacks.onModelChange).toHaveBeenCalledWith('sonnet');
   });
 
   it('should display the selected provider icon before the model label', () => {
@@ -268,7 +306,7 @@ describe('ModelSelector', () => {
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
     expect(dropdown).not.toBeNull();
     // DEFAULT_CLAUDE_MODELS is [haiku, sonnet, opus] -> reversed is [opus, sonnet, haiku]
-    const options = dropdown?.children || [];
+    const options = dropdown?.querySelectorAll('.claudian-model-option') || [];
     expect(options.length).toBe(3);
     // Text is in child span, check first child's textContent
     expect(options[0]?.children[0]?.textContent).toBe('Opus');
@@ -293,7 +331,8 @@ describe('ModelSelector', () => {
     parentEl.querySelector('.claudian-model-selector')?.dispatchEvent('mouseenter');
 
     expect(parentEl.querySelector('.claudian-model-label')?.textContent).toBe('GPT New');
-    const options = parentEl.querySelector('.claudian-model-dropdown')?.children ?? [];
+    const options = parentEl.querySelector('.claudian-model-dropdown')
+      ?.querySelectorAll('.claudian-model-option') ?? [];
     expect(options.map((option: any) => option.children[0]?.textContent)).toEqual([
       'GPT Fast',
       'GPT New',
@@ -315,6 +354,35 @@ describe('ModelSelector', () => {
 
     await opusOption?.dispatchEvent('click', { stopPropagation: () => {} });
     expect(callbacks.onModelChange).toHaveBeenCalledWith('opus');
+  });
+
+  it('adds and selects a custom model from the live selector', async () => {
+    const form = parentEl.querySelector('.claudian-model-custom-form');
+    const input = form?.querySelector('.claudian-model-custom-input');
+    input.value = ' claude-opus-5 ';
+
+    await form?.dispatchEvent('submit', {
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(callbacks.onCustomModelAdd).toHaveBeenCalledWith('claude-opus-5');
+    expect(callbacks.onModelChange).toHaveBeenCalledWith('claude-opus-5');
+  });
+
+  it('marks an empty custom model ID invalid without submitting', () => {
+    const form = parentEl.querySelector('.claudian-model-custom-form');
+    const input = form?.querySelector('.claudian-model-custom-input');
+
+    form?.dispatchEvent('submit', {
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    });
+
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    expect(callbacks.onCustomModelAdd).not.toHaveBeenCalled();
   });
 
   it('should always show brand color on model button', () => {

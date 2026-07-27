@@ -193,6 +193,7 @@ export class SessionStorage {
     return {
       id: conversation.id,
       providerId: conversation.providerId,
+      runtimeProfileId: conversation.runtimeProfileId,
       title: conversation.title,
       titleGenerationStatus: conversation.titleGenerationStatus,
       createdAt: conversation.createdAt,
@@ -201,6 +202,7 @@ export class SessionStorage {
       sessionId: conversation.sessionId,
       selectedModel: conversation.selectedModel,
       providerState: providerState && Object.keys(providerState).length > 0 ? providerState : undefined,
+      collaboration: conversation.collaboration,
       currentNote: conversation.currentNote,
       externalContextPaths: conversation.externalContextPaths,
       enabledMcpServers: conversation.enabledMcpServers,

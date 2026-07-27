@@ -39,6 +39,27 @@ export const claudeChatUIConfig: ProviderChatUIConfig = {
     return getClaudeModelOptions(settings);
   },
 
+  addCustomModel(model, settings) {
+    const modelId = toClaudeRuntimeModelId(model).trim();
+    if (!modelId || /[\r\n]/.test(modelId)) {
+      throw new Error('Enter a valid Claude model ID');
+    }
+
+    const target = settings as Record<string, unknown>;
+    const claudeSettings = getClaudeProviderSettings(target);
+    const configuredModels = claudeSettings.customModels
+      .split(/\r?\n/)
+      .map(value => value.trim())
+      .filter(Boolean);
+    if (!configuredModels.some(value => toClaudeRuntimeModelId(value) === modelId)) {
+      configuredModels.push(modelId);
+      updateClaudeProviderSettings(target, {
+        customModels: configuredModels.join('\n'),
+      });
+    }
+    return modelId;
+  },
+
   ownsModel(model: string, settings: Record<string, unknown>): boolean {
     const runtimeModel = toClaudeRuntimeModelId(model);
     return getClaudeModelOptions(settings).some((option: ProviderUIOption) =>

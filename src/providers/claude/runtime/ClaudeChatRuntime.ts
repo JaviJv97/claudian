@@ -45,6 +45,7 @@ import type {
   ChatTurnMetadata,
   ChatTurnRequest,
   PreparedChatTurn,
+  ProviderQuotaSnapshot,
   SessionUpdateResult,
 } from '../../../core/runtime/types';
 import { TOOL_ENTER_PLAN_MODE, TOOL_SKILL } from '../../../core/tools/toolNames';
@@ -71,6 +72,11 @@ import {
   isSessionMissingError,
 } from '../../../utils/session';
 import { CLAUDE_PROVIDER_CAPABILITIES } from '../capabilities';
+import {
+  type ClaudeRuntimeProfileBinding,
+  resolveClaudeRuntimeProfileBinding,
+  resolveClaudeRuntimeProfileEnvironment,
+} from '../config/ClaudeRuntimeProfile';
 import { loadSubagentFinalResult, loadSubagentToolCalls } from '../history/ClaudeHistoryStore';
 import { loadClaudeAgentQuery } from '../loadClaudeAgentSdk';
 import { toClaudeRuntimeModelId } from '../modelSelection';
@@ -99,6 +105,7 @@ import {
   QueryOptionsBuilder,
   type QueryOptionsContext,
 } from './ClaudeQueryOptionsBuilder';
+import { mapClaudeUsageToQuotaSnapshot } from './ClaudeQuotaSnapshot';
 import { executeClaudeRewind } from './ClaudeRewindService';
 import { SessionManager } from './ClaudeSessionManager';
 import {
@@ -125,6 +132,7 @@ export interface ClaudeRuntimeServices {
   mcpManager: McpServerManager;
   pluginManager: AppPluginManager;
   agentManager: Pick<AppAgentManager, 'setBuiltinAgentNames'>;
+  runtimeProfileId?: string;
 }
 
 type QueryOptions = ChatRuntimeQueryOptions;
@@ -155,6 +163,9 @@ export class ClaudianService implements ChatRuntime {
   private currentConversationModel: string | null = null;
   private currentConversationId: string | null = null;
   private readyStateListeners = new Set<(ready: boolean) => void>();
+  readonly runtimeProfileId?: string;
+  readonly accountBindingFingerprint?: string;
+  private readonly runtimeProfileBinding: ClaudeRuntimeProfileBinding | null;
 
   // Modular components
   private sessionManager = new SessionManager();
@@ -239,16 +250,42 @@ export class ClaudianService implements ChatRuntime {
       this.mcpManager = services.mcpManager;
       this.pluginManager = services.pluginManager ?? legacyPlugin.pluginManager ?? null;
       this.agentManager = services.agentManager ?? legacyPlugin.agentManager ?? null;
+      this.runtimeProfileId = services.runtimeProfileId;
+      this.runtimeProfileBinding = resolveClaudeRuntimeProfileBinding(
+        services.runtimeProfileId,
+        this.plugin.settings,
+      );
+      this.accountBindingFingerprint = this.runtimeProfileBinding?.fingerprint;
       return;
     }
 
     this.mcpManager = services;
     this.pluginManager = legacyPlugin.pluginManager ?? null;
     this.agentManager = legacyPlugin.agentManager ?? null;
+    this.runtimeProfileBinding = null;
   }
 
   getCapabilities() {
     return CLAUDE_PROVIDER_CAPABILITIES;
+  }
+
+  async getQuotaSnapshot(): Promise<ProviderQuotaSnapshot> {
+    if (!this.persistentQuery || this.shuttingDown) {
+      throw new Error('Claude runtime must be ready before refreshing quota.');
+    }
+    const usage = await this.persistentQuery
+      .usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+    const snapshot = mapClaudeUsageToQuotaSnapshot(usage);
+    const binding = this.runtimeProfileBinding;
+    return {
+      ...snapshot,
+      ...(binding
+        ? {
+          runtimeProfileId: binding.runtimeProfileId,
+          accountBindingFingerprint: binding.fingerprint,
+        }
+        : {}),
+    };
   }
 
   async prepareForTurn(): Promise<void> {
@@ -802,7 +839,12 @@ export class ClaudianService implements ChatRuntime {
   }
 
   private buildQueryOptionsContext(vaultPath: string, cliPath: string): QueryOptionsContext {
-    const customEnv = parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId));
+    const customEnv = {
+      ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
+      ...(this.runtimeProfileBinding
+        ? { CLAUDE_CONFIG_DIR: this.runtimeProfileBinding.configDir }
+        : resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings)),
+    };
     const enhancedPath = getEnhancedPath(customEnv.PATH, cliPath);
 
     return {
@@ -817,9 +859,12 @@ export class ClaudianService implements ChatRuntime {
   }
 
   private buildHistoryPathContext(vaultPath: string): ProviderHistoryPathContext {
-    const customEnv = parseEnvironmentVariables(
-      this.plugin.getActiveEnvironmentVariables(this.providerId),
-    );
+    const customEnv = {
+      ...parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables(this.providerId)),
+      ...(this.runtimeProfileBinding
+        ? { CLAUDE_CONFIG_DIR: this.runtimeProfileBinding.configDir }
+        : resolveClaudeRuntimeProfileEnvironment(this.runtimeProfileId, this.plugin.settings)),
+    };
     return {
       environment: { ...process.env, ...customEnv },
       hostPlatform: process.platform,

@@ -150,6 +150,7 @@ export class StreamController {
         }
         msg.content += chunk.content;
         await this.appendText(chunk.content);
+        state.notifyMessagesChanged();
         break;
 
       case 'tool_use': {

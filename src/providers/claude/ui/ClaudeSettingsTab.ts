@@ -12,6 +12,7 @@ import { getClaudeWorkspaceServices } from '../app/ClaudeWorkspaceServices';
 import { resolveClaudeModelSelection } from '../modelOptions';
 import {
   CLAUDE_SAFE_MODES,
+  type ClaudeCollaborationProfile,
   type ClaudeSafeMode,
   getClaudeProviderSettings,
   updateClaudeProviderSettings,
@@ -136,6 +137,118 @@ export const claudeSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
       updateCliPathValidation(currentValue, text.inputEl);
     });
+
+    // --- Collaboration profiles ---
+
+    new Setting(container).setName('Collaboration profiles').setHeading();
+    container.createEl('p', {
+      cls: 'setting-item-description',
+      text: 'Stable personal and company roles ship with Claudian. Connect each role to this device’s Claude config directory; credentials remain in Claude’s own files. Usage stays unavailable when a role cannot be verified.',
+    });
+    const profilesContainer = container.createDiv({
+      cls: 'claudian-collaboration-profile-settings',
+    });
+    let profiles = claudeSettings.collaborationProfiles.map(profile => ({ ...profile }));
+
+    const persistProfiles = async (): Promise<void> => {
+      await context.plugin.mutateSettings((settings) => {
+        const updated = updateClaudeProviderSettings(settings, {
+          collaborationProfiles: profiles.map(profile => ({ ...profile })),
+        });
+        profiles = updated.collaborationProfiles.map(profile => ({ ...profile }));
+      });
+      await context.plugin.recycleProviderRuntimes?.('claude');
+    };
+
+    const renderProfiles = (): void => {
+      profilesContainer.empty();
+      profiles.forEach((profile, index) => {
+        const expandedPath = expandHomePath(profile.configDir);
+        const directoryExists = (() => {
+          try {
+            return fs.statSync(expandedPath).isDirectory();
+          } catch {
+            return false;
+          }
+        })();
+
+        const row = new Setting(profilesContainer)
+          .setName(profile.label || 'Unnamed profile')
+          .setDesc(directoryExists
+            ? `Configured · authentication is verified when the runtime starts · ${profile.configDir}`
+            : `Directory not found · ${profile.configDir}`);
+        row.addToggle(toggle => toggle
+          .setValue(profile.enabled)
+          .onChange(async (enabled) => {
+            profiles[index] = { ...profiles[index], enabled };
+            await persistProfiles();
+            renderProfiles();
+          }));
+        const removeButton = (row.controlEl ?? profilesContainer).createEl('button', {
+          cls: 'clickable-icon',
+          text: '×',
+          attr: { 'aria-label': `Remove ${profile.label || 'profile'}` },
+        });
+        removeButton.onclick = async () => {
+          profiles = profiles.filter((_, candidateIndex) => candidateIndex !== index);
+          await persistProfiles();
+          renderProfiles();
+        };
+
+        const fields = profilesContainer.createDiv({
+          cls: 'claudian-collaboration-profile-fields',
+        });
+        const commitField = async (
+          updates: Partial<ClaudeCollaborationProfile>,
+        ): Promise<void> => {
+          profiles[index] = { ...profiles[index], ...updates };
+          await persistProfiles();
+          renderProfiles();
+        };
+        new Setting(fields).setName('Name').addText(text => {
+          text.setValue(profile.label).setPlaceholder('Claude work');
+          text.inputEl.addEventListener('blur', () => {
+            const label = text.getValue().trim();
+            if (label && label !== profile.label) void commitField({ label });
+          });
+        });
+        new Setting(fields).setName('Profile ID').addText(text => {
+          text.setValue(profile.id).setPlaceholder('Profile-id');
+          text.inputEl.addEventListener('blur', () => {
+            const id = text.getValue().trim();
+            if (id && id !== profile.id) void commitField({ id });
+          });
+        });
+        new Setting(fields).setName('Config directory').addText(text => {
+          text.setValue(profile.configDir).setPlaceholder('Config directory');
+          text.inputEl.addEventListener('blur', () => {
+            const configDir = text.getValue().trim();
+            if (configDir && configDir !== profile.configDir) {
+              void commitField({ configDir });
+            }
+          });
+        });
+      });
+    };
+
+    const addProfileSetting = new Setting(container)
+      .setName('Add another Claude account')
+      .setDesc('Use a unique profile ID and a separate Claude config directory.');
+    const addProfileButton = (addProfileSetting.controlEl ?? container).createEl('button', {
+      text: 'Add profile',
+    });
+    addProfileButton.onclick = () => {
+      let suffix = profiles.length + 1;
+      while (profiles.some(profile => profile.id === `profile-${suffix}`)) suffix += 1;
+      profiles.push({
+        id: `profile-${suffix}`,
+        label: `Claude Profile ${suffix}`,
+        configDir: `~/.claude-profile-${suffix}`,
+        enabled: false,
+      });
+      void persistProfiles().then(renderProfiles);
+    };
+    renderProfiles();
 
     // --- Safety ---
 

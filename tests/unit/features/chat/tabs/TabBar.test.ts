@@ -90,6 +90,19 @@ describe('TabBar', () => {
       expect(containerEl._children[0].textContent).toBe('5');
     });
 
+    it('should display an explicit badge label when provided', () => {
+      const containerEl = createMockEl();
+      const callbacks = createMockCallbacks();
+      const tabBar = new TabBar(containerEl, callbacks);
+
+      tabBar.update([createTabBarItem({
+        badgeLabel: 'Claude + Codex',
+        index: 1,
+      })]);
+
+      expect(containerEl._children[0].textContent).toBe('Claude + Codex');
+    });
+
     it('should use aria-label as the single tab title tooltip source', () => {
       const containerEl = createMockEl();
       const callbacks = createMockCallbacks();

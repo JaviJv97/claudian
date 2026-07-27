@@ -76,6 +76,33 @@ export interface ChatRuntimeEnsureReadyOptions {
   providerTransitionOwner?: boolean;
 }
 
+export interface ProviderQuotaWindow {
+  id: string;
+  label: string;
+  utilizationPercent: number;
+  /** Unix epoch milliseconds. */
+  resetsAt?: number;
+}
+
+export interface ProviderQuotaSnapshot {
+  source: 'provider';
+  fetchedAt: number;
+  /** Stable logical account role that produced this snapshot, when applicable. */
+  runtimeProfileId?: string;
+  /** Non-secret fingerprint of the device-local account binding. */
+  accountBindingFingerprint?: string;
+  plan?: string;
+  windows: ProviderQuotaWindow[];
+  unavailableReason?: string;
+  extraUsage?: {
+    enabled: boolean;
+    utilizationPercent?: number;
+    usedCredits?: number;
+    monthlyLimit?: number;
+    currency?: string;
+  };
+}
+
 export type ChatRuntimeConversationState = Pick<
   Conversation,
   'sessionId' | 'providerState' | 'selectedModel'

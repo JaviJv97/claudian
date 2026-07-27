@@ -1,6 +1,7 @@
 import type { SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { spawn } from 'child_process';
 
+import { ClaudeProcessRegistry } from '@/core/runtime/ClaudeProcessRegistry';
 import { createCustomSpawnFunction } from '@/providers/claude/runtime/customSpawn';
 import * as env from '@/utils/env';
 
@@ -13,6 +14,7 @@ describe('createCustomSpawnFunction', () => {
   const spawnMock = spawn as jest.MockedFunction<typeof spawn>;
 
   afterEach(() => {
+    ClaudeProcessRegistry.resetForTests();
     Object.defineProperty(process, 'platform', { value: originalPlatform });
     jest.restoreAllMocks();
     spawnMock.mockReset();
@@ -240,6 +242,7 @@ describe('createCustomSpawnFunction', () => {
   });
 
   it('kills the process tree when aborting manually configured Windows .cmd commands', () => {
+    jest.useFakeTimers();
     Object.defineProperty(process, 'platform', { value: 'win32' });
     const mockProcess = createMockProcess();
     const originalKill = mockProcess.kill;
@@ -266,6 +269,7 @@ describe('createCustomSpawnFunction', () => {
       }),
     );
     expect(originalKill).not.toHaveBeenCalled();
+    jest.useRealTimers();
   });
 
   it('delegates returned Windows .cmd process kill to process-tree termination', () => {
@@ -317,7 +321,9 @@ describe('createCustomSpawnFunction', () => {
   });
 
   it('kills child immediately when signal is already aborted', () => {
+    jest.useFakeTimers();
     const mockProcess = createMockProcess();
+    const originalKill = mockProcess.kill;
     spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
 
     const controller = new AbortController();
@@ -332,11 +338,14 @@ describe('createCustomSpawnFunction', () => {
       signal: controller.signal,
     });
 
-    expect(mockProcess.kill).toHaveBeenCalled();
+    expect(originalKill).toHaveBeenCalledWith('SIGTERM');
+    jest.useRealTimers();
   });
 
   it('kills child when signal aborts after spawn', () => {
+    jest.useFakeTimers();
     const mockProcess = createMockProcess();
+    const originalKill = mockProcess.kill;
     spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
 
     const controller = new AbortController();
@@ -350,15 +359,67 @@ describe('createCustomSpawnFunction', () => {
       signal: controller.signal,
     });
 
-    expect(mockProcess.kill).not.toHaveBeenCalled();
+    expect(originalKill).not.toHaveBeenCalled();
 
     controller.abort();
 
-    expect(mockProcess.kill).toHaveBeenCalled();
+    expect(originalKill).toHaveBeenCalledWith('SIGTERM');
+    jest.useRealTimers();
+  });
+
+  it('starts POSIX Claude processes in their own process group and terminates the group', () => {
+    jest.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const mockProcess = createMockProcess();
+    spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
+    const processKillSpy = jest.spyOn(process, 'kill').mockReturnValue(true);
+    const controller = new AbortController();
+
+    const spawnFn = createCustomSpawnFunction('/enhanced/path');
+    spawnFn({
+      command: 'node',
+      args: ['cli.js'],
+      cwd: '/tmp',
+      env: {},
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({ detached: true }),
+    );
+    expect(processKillSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
+    jest.useRealTimers();
+  });
+
+  it('force-kills the POSIX process group when graceful shutdown does not finish', () => {
+    jest.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const mockProcess = createMockProcess();
+    spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
+    const processKillSpy = jest.spyOn(process, 'kill').mockReturnValue(true);
+    const controller = new AbortController();
+
+    createCustomSpawnFunction('/enhanced/path')({
+      command: 'node',
+      args: ['cli.js'],
+      cwd: '/tmp',
+      env: {},
+      signal: controller.signal,
+    });
+    controller.abort();
+    jest.advanceTimersByTime(2_000);
+
+    expect(processKillSpy).toHaveBeenNthCalledWith(1, -12345, 'SIGTERM');
+    expect(processKillSpy).toHaveBeenNthCalledWith(2, -12345, 'SIGKILL');
+    jest.useRealTimers();
   });
 
   it('does not kill child when signal is not provided', () => {
     const mockProcess = createMockProcess();
+    const originalKill = mockProcess.kill;
     spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
 
     const spawnFn = createCustomSpawnFunction('/enhanced/path');
@@ -369,6 +430,6 @@ describe('createCustomSpawnFunction', () => {
       env: {},
     } as SpawnOptions);
 
-    expect(mockProcess.kill).not.toHaveBeenCalled();
+    expect(originalKill).not.toHaveBeenCalled();
   });
 });

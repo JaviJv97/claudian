@@ -1,13 +1,25 @@
 /* Input area */
 .claudian-input-container {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
   padding: 12px 0 0 0;
 }
 
 .claudian-input-footer {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
   flex-shrink: 0;
   padding: 6px 0 0 0;
+  container-name: claudian-input-footer;
+  container-type: inline-size;
+}
+
+.claudian-active-input-slot,
+.claudian-input-composer {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .claudian-active-input-slot > .claudian-input-composer > .claudian-input-container {
@@ -21,7 +33,10 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   min-height: 140px;
+  box-sizing: border-box;
   border: 1px solid var(--claudian-input-wrapper-border-color);
   border-radius: 6px;
   background: var(--background-primary);
@@ -116,6 +131,31 @@
 
 .claudian-input-wrapper textarea.claudian-input::placeholder {
   color: var(--text-muted);
+}
+
+@container claudian-input-footer (max-width: 420px) {
+  .claudian-input-wrapper {
+    min-height: 112px;
+  }
+
+  .claudian-input-toolbar {
+    gap: 4px;
+    row-gap: 6px;
+  }
+
+  .claudian-model-scope {
+    max-width: 112px;
+  }
+
+  .claudian-input-nav-actions {
+    gap: 6px;
+  }
+}
+
+@container claudian-input-footer (max-width: 300px) {
+  .claudian-model-scope {
+    display: none;
+  }
 }
 
 /* Input toolbar */
