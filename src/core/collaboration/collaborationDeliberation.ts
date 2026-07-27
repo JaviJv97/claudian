@@ -59,6 +59,7 @@ export function buildDeliberationInstruction(
               : ''}`;
           }).join('\n')}`,
           'Do not assign unavailable participants. Avoid preserve participants unless the task explicitly requires them and no active participant can safely own or review it.',
+          'Prefer participants with lower weekly utilization. Avoid assigning accounts at or above 90% weekly usage unless their unique capability is necessary.',
           'End with exactly one fenced JSON block using this schema:',
           '```task-graph',
           '{"tasks":[{"id":"TASK-001","title":"Short title","description":"Bounded deliverable","ownerId":"participant-id","reviewerId":"different-participant-id","dependsOn":[],"fileScopes":["path/**"],"acceptanceCriteria":["observable result"],"verificationCommands":["exact command"],"risk":"low|medium|high"}]}',

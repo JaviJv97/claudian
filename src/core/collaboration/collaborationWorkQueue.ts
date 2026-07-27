@@ -190,6 +190,29 @@ export function setCollaborationWorkQueuePaused(
   return updated;
 }
 
+export function updateCollaborationDraftTaskAssignment(
+  queue: CollaborationWorkQueue,
+  taskId: string,
+  ownerId: string,
+  reviewerId: string,
+  participantIds: readonly string[],
+  now = Date.now(),
+): CollaborationWorkQueue {
+  if (queue.status !== 'draft') throw new Error('Only a draft queue can be reassigned');
+  if (!participantIds.includes(ownerId)) throw new Error(`Unknown task owner: ${ownerId}`);
+  if (!participantIds.includes(reviewerId)) throw new Error(`Unknown task reviewer: ${reviewerId}`);
+  if (ownerId === reviewerId) throw new Error('Task owner and reviewer must differ');
+  const updated = structuredClone(queue);
+  const task = updated.tasks.find(candidate => candidate.id === taskId);
+  if (!task) throw new Error(`Task not found: ${taskId}`);
+  now = Math.max(now, queue.updatedAt + 1);
+  task.ownerId = ownerId;
+  task.reviewerId = reviewerId;
+  task.updatedAt = now;
+  updated.updatedAt = now;
+  return updated;
+}
+
 export function findCollaborationTaskScopeConflicts(
   queue: CollaborationWorkQueue,
 ): CollaborationTaskScopeConflict[] {

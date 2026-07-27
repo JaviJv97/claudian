@@ -53,6 +53,11 @@ interface CollaborationTimelineOptions {
   onRetryWorkTask: (taskId: string) => Promise<void>;
   onRecoverWorkTask: (taskId: string) => Promise<void>;
   onSetWorkQueuePaused: (paused: boolean) => Promise<void>;
+  onUpdateDraftTaskAssignment: (
+    taskId: string,
+    ownerId: string,
+    reviewerId: string,
+  ) => Promise<void>;
   onRetryApprovedPlan: (deliberationId: string) => Promise<void>;
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
   onRequestWorkflowChanges: (workflowId: string, deliberationId: string) => Promise<void>;
@@ -683,9 +688,72 @@ export class CollaborationTimeline {
         } · ${task.fileScopes.join(', ')}${
           this.options.participantResourcePolicies[task.ownerId]?.mode === 'preserve'
             ? ' · owner preserved'
-            : ''
+            : this.options.participantResourcePolicies[task.ownerId]?.weeklyUsagePercent !== undefined
+              ? ` · owner ${
+                this.options.participantResourcePolicies[task.ownerId]?.weeklyUsagePercent
+              }% week`
+              : ''
         }`,
       });
+      if (queue.status === 'draft') {
+        const assignment = item.createDiv({
+          cls: 'claudian-collaboration-work-task-assignment',
+          attr: { 'aria-label': `${task.id} owner and reviewer` },
+        });
+        const createParticipantSelect = (
+          label: string,
+          selectedId: string,
+        ): HTMLSelectElement => {
+          const wrapper = assignment.createEl('label');
+          wrapper.createSpan({ text: label });
+          const select = wrapper.createEl('select');
+          for (const participantId of Object.keys(this.options.participantLabels)) {
+            const option = select.createEl('option', {
+              text: `${this.getParticipantLabel(participantId)}${
+                this.options.participantResourcePolicies[participantId]?.mode === 'preserve'
+                  ? ' (preserve)'
+                  : this.options.participantResourcePolicies[participantId]?.mode === 'unavailable'
+                    ? ' (unavailable)'
+                    : this.options.participantResourcePolicies[participantId]
+                      ?.weeklyUsagePercent !== undefined
+                      ? ` (${
+                        this.options.participantResourcePolicies[participantId]
+                          ?.weeklyUsagePercent
+                      }% week)`
+                    : ''
+              }`,
+              attr: { value: participantId },
+            });
+            option.selected = participantId === selectedId;
+            option.disabled = (
+              this.options.participantResourcePolicies[participantId]?.mode === 'unavailable'
+            );
+          }
+          return select;
+        };
+        const ownerSelect = createParticipantSelect('Owner', task.ownerId);
+        const reviewerSelect = createParticipantSelect('Reviewer', task.reviewerId);
+        const updateAssignment = (changed: 'owner' | 'reviewer') => {
+          if (ownerSelect.value === reviewerSelect.value) {
+            if (changed === 'owner') reviewerSelect.value = task.ownerId;
+            else ownerSelect.value = task.reviewerId;
+          }
+          ownerSelect.disabled = true;
+          reviewerSelect.disabled = true;
+          void this.options.onUpdateDraftTaskAssignment(
+            task.id,
+            ownerSelect.value,
+            reviewerSelect.value,
+          ).catch(() => {
+            ownerSelect.value = task.ownerId;
+            reviewerSelect.value = task.reviewerId;
+            ownerSelect.disabled = false;
+            reviewerSelect.disabled = false;
+          });
+        };
+        ownerSelect.addEventListener('change', () => updateAssignment('owner'));
+        reviewerSelect.addEventListener('change', () => updateAssignment('reviewer'));
+      }
       if (task.dependsOn.length > 0) {
         item.createDiv({
           cls: 'claudian-collaboration-work-task-dependencies',

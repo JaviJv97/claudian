@@ -4,6 +4,7 @@ import {
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
+  updateCollaborationDraftTaskAssignment,
   validateCollaborationWorkQueue,
 } from '@/core/collaboration/collaborationWorkQueue';
 import type { CollaborationWorkQueue } from '@/core/types';
@@ -103,6 +104,30 @@ describe('collaboration work queue', () => {
     expect(paused.status).toBe('paused');
     expect(resumed.status).toBe('approved');
     expect(resumed.tasks.map(task => task.status)).toEqual(['ready', 'blocked']);
+  });
+
+  it('lets a human reassign a draft task while preserving independent review', () => {
+    const updated = updateCollaborationDraftTaskAssignment(
+      queue(),
+      'TASK-001',
+      'company',
+      'personal',
+      participants,
+      20,
+    );
+
+    expect(updated.tasks[0]).toMatchObject({
+      ownerId: 'company',
+      reviewerId: 'personal',
+      updatedAt: 20,
+    });
+    expect(() => updateCollaborationDraftTaskAssignment(
+      updated,
+      'TASK-001',
+      'company',
+      'company',
+      participants,
+    )).toThrow('must differ');
   });
 
   it('rejects unknown dependencies, cycles, and same-person review', () => {

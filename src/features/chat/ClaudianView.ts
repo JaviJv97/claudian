@@ -37,6 +37,7 @@ import {
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
+  updateCollaborationDraftTaskAssignment,
 } from '../../core/collaboration/collaborationWorkQueue';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
@@ -2008,6 +2009,21 @@ export class ClaudianView extends ItemView {
               throw error;
             }
           },
+          onUpdateDraftTaskAssignment: async (taskId, ownerId, reviewerId) => {
+            try {
+              await this.updateCollaborationDraftTaskAssignment(
+                roomId,
+                taskId,
+                ownerId,
+                reviewerId,
+              );
+            } catch (error) {
+              new Notice(
+                error instanceof Error ? error.message : `Could not reassign ${taskId}`,
+              );
+              throw error;
+            }
+          },
           onRetryApprovedPlan: async (deliberationId) => {
             await this.startApprovedCollaborationPlan(
               tab.id,
@@ -2374,6 +2390,31 @@ export class ClaudianView extends ItemView {
       room.workQueue.updatedAt,
     );
     new Notice(paused ? 'Task queue paused.' : 'Task queue resumed.');
+    this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async updateCollaborationDraftTaskAssignment(
+    roomId: string,
+    taskId: string,
+    ownerId: string,
+    reviewerId: string,
+  ): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    const queue = updateCollaborationDraftTaskAssignment(
+      room.workQueue,
+      taskId,
+      ownerId,
+      reviewerId,
+      room.participants
+        .filter(participant => participant.resourcePolicy?.mode !== 'unavailable')
+        .map(getCollaborationParticipantId),
+    );
+    await this.plugin.storage.rooms.updateWorkQueue(
+      roomId,
+      queue,
+      room.workQueue.updatedAt,
+    );
     this.refreshCollaborationTimelines(roomId);
   }
 

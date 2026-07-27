@@ -67,6 +67,7 @@ describe('collaboration deliberation', () => {
     expect(instruction).toContain('personal: preserve · 97% week');
     expect(instruction).toContain('Do not assign unavailable participants');
     expect(instruction).toContain('Avoid preserve participants');
+    expect(instruction).toContain('at or above 90% weekly usage');
   });
 
   it('requires explicit unanimous approval and preserves objections', () => {
