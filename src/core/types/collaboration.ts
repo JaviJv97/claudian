@@ -81,6 +81,7 @@ export interface CollaborationWorkQueue {
   createdAt: number;
   updatedAt: number;
   approvedAt?: number;
+  completionApprovedAt?: number;
   tasks: CollaborationWorkTask[];
 }
 

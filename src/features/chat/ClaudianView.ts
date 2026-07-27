@@ -34,6 +34,7 @@ import {
 } from '../../core/collaboration/collaborationWorkflow';
 import {
   approveCollaborationWorkQueue,
+  approveCompletedCollaborationWorkQueue,
   type CollaborationDraftTaskContractUpdate,
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
@@ -2036,6 +2037,16 @@ export class ClaudianView extends ItemView {
               throw error;
             }
           },
+          onApproveCompletedWorkQueue: async () => {
+            try {
+              await this.approveCompletedCollaborationWorkQueue(roomId);
+            } catch (error) {
+              new Notice(
+                error instanceof Error ? error.message : 'Could not approve the completed queue',
+              );
+              throw error;
+            }
+          },
           onRetryApprovedPlan: async (deliberationId) => {
             await this.startApprovedCollaborationPlan(
               tab.id,
@@ -2447,6 +2458,28 @@ export class ClaudianView extends ItemView {
       queue,
       room.workQueue.updatedAt,
     );
+    this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async approveCompletedCollaborationWorkQueue(roomId: string): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    const queue = approveCompletedCollaborationWorkQueue(room.workQueue);
+    await this.plugin.storage.rooms.updateWorkQueue(
+      roomId,
+      queue,
+      room.workQueue.updatedAt,
+    );
+    await this.plugin.storage.rooms.appendEvent(roomId, {
+      id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      kind: 'system',
+      authorId: 'system',
+      recipientIds: ['user'],
+      content: 'Completed task queue approved by the user after evidence review.',
+      createdAt: Date.now(),
+      delivery: {},
+    });
+    new Notice('Completed queue approved.');
     this.refreshCollaborationTimelines(roomId);
   }
 

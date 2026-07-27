@@ -73,6 +73,7 @@ interface CollaborationTimelineOptions {
       | 'maxAttempts'
     >>,
   ) => Promise<void>;
+  onApproveCompletedWorkQueue: () => Promise<void>;
   onRetryApprovedPlan: (deliberationId: string) => Promise<void>;
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
   onRequestWorkflowChanges: (workflowId: string, deliberationId: string) => Promise<void>;
@@ -959,6 +960,31 @@ export class CollaborationTimeline {
           approve.setText('Approve queue');
         });
       });
+    }
+    if (queue.status === 'completed') {
+      if (queue.completionApprovedAt) {
+        panel.createDiv({
+          cls: 'claudian-collaboration-work-queue-complete',
+          text: 'Accepted by you',
+        });
+      } else {
+        const approve = panel.createEl('button', {
+          cls: 'claudian-collaboration-work-queue-approve',
+          text: 'Approve completed queue',
+          attr: {
+            type: 'button',
+            title: 'Record final human acceptance after inspecting all task evidence.',
+          },
+        });
+        approve.addEventListener('click', () => {
+          approve.disabled = true;
+          approve.setText('Approving…');
+          void this.options.onApproveCompletedWorkQueue().catch(() => {
+            approve.disabled = false;
+            approve.setText('Approve completed queue');
+          });
+        });
+      }
     }
   }
 

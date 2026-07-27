@@ -190,6 +190,21 @@ export function setCollaborationWorkQueuePaused(
   return updated;
 }
 
+export function approveCompletedCollaborationWorkQueue(
+  queue: CollaborationWorkQueue,
+  now = Date.now(),
+): CollaborationWorkQueue {
+  if (queue.status !== 'completed') throw new Error('The work queue is not complete');
+  if (!queue.tasks.every(task => task.status === 'done' || task.status === 'cancelled')) {
+    throw new Error('Every task must be resolved before final approval');
+  }
+  const updated = structuredClone(queue);
+  now = Math.max(now, queue.updatedAt + 1);
+  updated.completionApprovedAt = now;
+  updated.updatedAt = now;
+  return updated;
+}
+
 export function updateCollaborationDraftTaskAssignment(
   queue: CollaborationWorkQueue,
   taskId: string,

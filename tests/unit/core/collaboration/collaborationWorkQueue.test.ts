@@ -1,5 +1,6 @@
 import {
   approveCollaborationWorkQueue,
+  approveCompletedCollaborationWorkQueue,
   findCollaborationTaskScopeConflicts,
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
@@ -256,5 +257,16 @@ describe('collaboration work queue', () => {
       actorId: 'codex',
       now: 26,
     })).toThrow('exhausted its retry budget');
+  });
+
+  it('keeps final human approval distinct from reviewer completion', () => {
+    const completed = queue();
+    completed.status = 'completed';
+    completed.tasks = completed.tasks.map(task => ({ ...task, status: 'done' }));
+
+    const accepted = approveCompletedCollaborationWorkQueue(completed, 30);
+
+    expect(accepted.status).toBe('completed');
+    expect(accepted.completionApprovedAt).toBe(30);
   });
 });

@@ -164,3 +164,13 @@
 .claudian-collaboration-work-task-contract-compact input {
   width: 100%;
 }
+
+.claudian-collaboration-work-queue-complete {
+  margin-top: var(--size-4-3);
+  padding: var(--size-4-2);
+  border: 1px solid var(--color-green);
+  border-radius: var(--radius-s);
+  color: var(--color-green);
+  text-align: center;
+  font-size: var(--font-ui-small);
+}
