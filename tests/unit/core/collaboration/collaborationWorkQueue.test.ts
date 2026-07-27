@@ -170,6 +170,19 @@ describe('collaboration work queue', () => {
     );
   });
 
+  it('rejects destructive verification commands and scopes outside the workspace', () => {
+    const unsafe = queue();
+    unsafe.tasks[0].verificationCommands = ['rm -rf build'];
+    unsafe.tasks[0].fileScopes = ['../shared/**'];
+
+    expect(validateCollaborationWorkQueue(unsafe, participants)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('unsafe file scope'),
+        expect.stringContaining('destructive verification command'),
+      ]),
+    );
+  });
+
   it('detects overlapping scopes among concurrently running tasks', () => {
     const candidate = queue();
     candidate.tasks[0].status = 'running';

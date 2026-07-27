@@ -65,6 +65,7 @@ export function buildDeliberationInstruction(
           '{"tasks":[{"id":"TASK-001","title":"Short title","description":"Bounded deliverable","ownerId":"participant-id","reviewerId":"different-participant-id","dependsOn":[],"fileScopes":["path/**"],"acceptanceCriteria":["observable result"],"verificationCommands":["exact command"],"risk":"low|medium|high"}]}',
           '```',
           'Every task needs bounded file scopes, objective acceptance criteria, and executable verification commands. ownerId and reviewerId must differ. Keep prose before the task graph under 400 words.',
+          'Verification commands must be non-destructive. Never propose recursive deletion, privilege escalation, hard resets, disk operations, or commands that pipe downloaded content into a shell. File scopes must remain inside the workspace and may not use absolute paths, home paths, or parent traversal.',
         ].join('\n')
         : [
           'Evaluate the proposed synthesis without proposing a different process.',

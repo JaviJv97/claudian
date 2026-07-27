@@ -50,6 +50,31 @@ function fileMatchesScope(path: string, scope: string): boolean {
   return normalizedPath === prefix;
 }
 
+function isUnsafeFileScope(scope: string): boolean {
+  const normalized = scope.trim().replace(/\\/g, '/');
+  return (
+    !normalizeScope(normalized)
+    || normalized.startsWith('/')
+    || normalized.startsWith('~/')
+    || normalized.split('/').includes('..')
+    || /\$(?:HOME|CODEX_HOME)\b/i.test(normalized)
+  );
+}
+
+function isDestructiveVerificationCommand(command: string): boolean {
+  return [
+    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\b/i,
+    /\bgit\s+reset\s+--hard\b/i,
+    /\bgit\s+clean\s+-[a-z]*f/i,
+    /\bsudo\b/i,
+    /\b(?:curl|wget)\b[^|\n]*\|\s*(?:ba)?sh\b/i,
+    /\bmkfs(?:\.\w+)?\b/i,
+    /\bdd\s+if=/i,
+    /\b(?:shutdown|reboot|poweroff)\b/i,
+    /\b(?:chmod|chown)\s+-R\b/i,
+  ].some(pattern => pattern.test(command));
+}
+
 export function parseCollaborationTaskGraph(
   content: string,
   sourceDeliberationId: string,
@@ -113,11 +138,19 @@ export function validateCollaborationWorkQueue(
     if (!participantIds.includes(task.reviewerId)) errors.push(`${task.id} has an unknown reviewer`);
     if (task.ownerId === task.reviewerId) errors.push(`${task.id} owner and reviewer must differ`);
     if (task.fileScopes.length === 0) errors.push(`${task.id} needs at least one file scope`);
+    for (const scope of task.fileScopes) {
+      if (isUnsafeFileScope(scope)) errors.push(`${task.id} has unsafe file scope ${scope}`);
+    }
     if (task.acceptanceCriteria.length === 0) {
       errors.push(`${task.id} needs at least one acceptance criterion`);
     }
     if (task.verificationCommands.length === 0) {
       errors.push(`${task.id} needs at least one verification command`);
+    }
+    for (const command of task.verificationCommands) {
+      if (isDestructiveVerificationCommand(command)) {
+        errors.push(`${task.id} has destructive verification command ${command}`);
+      }
     }
   }
   for (const task of queue.tasks) {

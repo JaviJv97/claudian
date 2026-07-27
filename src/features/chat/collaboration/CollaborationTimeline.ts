@@ -5,6 +5,7 @@ import {
   getQuotaRoutingRecommendation,
   isQuotaSnapshotStale,
 } from '../../../core/collaboration/collaborationResourcePolicy';
+import { validateCollaborationWorkQueue } from '../../../core/collaboration/collaborationWorkQueue';
 import type {
   CollaborationDiscussionMode,
   CollaborationEvent,
@@ -960,11 +961,32 @@ export class CollaborationTimeline {
       }
     }
     if (queue.status === 'draft') {
+      const validationErrors = validateCollaborationWorkQueue(
+        queue,
+        Object.keys(this.options.participantLabels).filter(participantId => (
+          this.options.participantResourcePolicies[participantId]?.mode !== 'unavailable'
+        )),
+      );
+      if (validationErrors.length > 0) {
+        const issues = panel.createDiv({
+          cls: 'claudian-collaboration-work-queue-issues',
+          attr: { role: 'status' },
+        });
+        issues.createDiv({
+          cls: 'claudian-collaboration-work-queue-issues-title',
+          text: `${validationErrors.length} issue${
+            validationErrors.length === 1 ? '' : 's'
+          } before approval`,
+        });
+        const list = issues.createEl('ul');
+        for (const error of validationErrors) list.createEl('li', { text: error });
+      }
       const approve = panel.createEl('button', {
         cls: 'claudian-collaboration-work-queue-approve',
-        text: 'Approve queue',
+        text: validationErrors.length > 0 ? 'Fix issues to approve' : 'Approve queue',
         attr: { type: 'button' },
       });
+      approve.disabled = validationErrors.length > 0;
       approve.addEventListener('click', () => {
         approve.disabled = true;
         approve.setText('Validating…');
