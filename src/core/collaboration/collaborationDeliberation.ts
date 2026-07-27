@@ -19,8 +19,20 @@ export function buildDeliberationInstruction(
   deliberationId: string,
 ): string {
   const events = room.events.filter(event => event.deliberationId === deliberationId);
+  const visiblePhases: CollaborationDeliberationPhase[] = phase === 'position'
+    ? []
+    : phase === 'critique'
+      ? ['position']
+      : phase === 'synthesis'
+        ? ['position', 'critique']
+        : ['synthesis'];
   const attributed = events
-    .filter(event => event.authorId !== 'user' && event.authorId !== 'system')
+    .filter(event => (
+      event.authorId !== 'user'
+      && event.authorId !== 'system'
+      && event.deliberationPhase
+      && visiblePhases.includes(event.deliberationPhase)
+    ))
     .map(event => {
       const participant = room.participants.find(candidate => (
         getCollaborationParticipantId(candidate) === event.authorId

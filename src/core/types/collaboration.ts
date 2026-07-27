@@ -43,8 +43,18 @@ export interface CollaborationDelivery {
   error?: string;
   providerMessageId?: string;
   conflictFiles?: string[];
+  fileProposals?: CollaborationFileProposal[];
   resolution?: 'kept-current' | 'applied-proposal';
   resolutionProviderId?: string;
+}
+
+export interface CollaborationFileProposal {
+  path: string;
+  participantId: string;
+  baseRevision: string;
+  currentRevision: string;
+  proposedContent: string;
+  createdAt: number;
 }
 
 export interface CollaborationAttachment {

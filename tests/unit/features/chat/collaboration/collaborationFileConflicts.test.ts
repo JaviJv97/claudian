@@ -2,6 +2,7 @@ import {
   captureCollaborationFileSnapshot,
   findChangedSharedFiles,
   findSharedReferencedFiles,
+  findStaleFileProposals,
 } from '@/features/chat/collaboration/collaborationFileConflicts';
 
 describe('collaborationFileConflicts', () => {
@@ -14,6 +15,33 @@ describe('collaborationFileConflicts', () => {
       'Claude.md',
       'Codex.md',
     ])).toEqual(['notes/Shared.md']);
+  });
+
+  it('captures an attributed proposal when an agent edits against a stale revision', () => {
+    const baseline = new Map([
+      ['Shared.md', { revision: '10:20', content: 'original' }],
+    ]);
+    const before = new Map([
+      ['Shared.md', { revision: '11:24', content: 'accepted first edit' }],
+    ]);
+    const after = new Map([
+      ['Shared.md', { revision: '12:30', content: 'stale second edit' }],
+    ]);
+
+    expect(findStaleFileProposals(
+      baseline,
+      before,
+      after,
+      'codex',
+      100,
+    )).toEqual([{
+      path: 'Shared.md',
+      participantId: 'codex',
+      baseRevision: '10:20',
+      currentRevision: '11:24',
+      proposedContent: 'stale second edit',
+      createdAt: 100,
+    }]);
   });
 
   it('reports only shared files changed since the turn began', () => {

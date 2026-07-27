@@ -31,6 +31,7 @@ interface CollaborationTimelineOptions {
     content: string,
     conflictFiles: string[],
   ) => Promise<void>;
+  onApplyProposal: (eventId: string, providerId: ProviderId) => Promise<void>;
   onReview: (
     reviewerId: ProviderId,
     sourceProviderId: ProviderId,
@@ -428,12 +429,12 @@ export class CollaborationTimeline {
       const retryButton = actionsEl.createEl('button', {
         cls: 'claudian-collaboration-retry',
         text: delivery.status === 'conflict'
-          ? `Apply ${this.getParticipantLabel(delivery.providerId)}`
+          ? `Rebase ${this.getParticipantLabel(delivery.providerId)}`
           : `Retry ${this.getParticipantLabel(delivery.providerId)}`,
         attr: {
           type: 'button',
           'aria-label': delivery.status === 'conflict'
-            ? `Apply ${this.getParticipantLabel(delivery.providerId)} proposal to the current file`
+            ? `Ask ${this.getParticipantLabel(delivery.providerId)} to rebase the proposal`
             : `Retry with ${this.getParticipantLabel(delivery.providerId)}`,
         },
       });
@@ -451,6 +452,21 @@ export class CollaborationTimeline {
           retryButton.disabled = false;
         });
       });
+      if (delivery.status === 'conflict' && (delivery.fileProposals?.length ?? 0) > 0) {
+        const applyButton = actionsEl.createEl('button', {
+          cls: 'claudian-collaboration-retry',
+          text: `Apply ${this.getParticipantLabel(delivery.providerId)}`,
+          attr: {
+            type: 'button',
+            'aria-label': `Explicitly apply ${this.getParticipantLabel(delivery.providerId)} proposal`,
+          },
+        });
+        applyButton.addEventListener('click', () => {
+          applyButton.disabled = true;
+          void this.options.onApplyProposal(delivery.eventId, delivery.providerId)
+            .catch(() => { applyButton.disabled = false; });
+        });
+      }
     }
   }
 

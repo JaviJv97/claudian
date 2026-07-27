@@ -1,5 +1,6 @@
 import type {
   CollaborationDeliveryStatus,
+  CollaborationFileProposal,
   CollaborationRoom,
   ProviderId,
 } from '../../../core/types';
@@ -10,6 +11,7 @@ export interface RetryableCollaborationDelivery {
   content: string;
   eventId: string;
   conflictFiles?: string[];
+  fileProposals?: CollaborationFileProposal[];
 }
 
 export function getLatestRetryableDeliveries(
@@ -28,6 +30,7 @@ export function getLatestRetryableDeliveries(
         content: latestUserEvent.recipientContent?.[providerId] ?? latestUserEvent.content,
         eventId: latestUserEvent.id,
         conflictFiles: delivery.conflictFiles,
+        fileProposals: delivery.fileProposals,
       }]
       : []
   ));

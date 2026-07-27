@@ -3,6 +3,7 @@ import type {
   CollaborationAttachment,
   CollaborationDelivery,
   CollaborationEvent,
+  CollaborationFileProposal,
   CollaborationParticipant,
   CollaborationRoom,
 } from '../types';
@@ -17,6 +18,7 @@ export interface CollaborationDispatchRequest {
 export interface CollaborationDispatchResult {
   providerMessageId?: string;
   conflictFiles?: string[];
+  fileProposals?: CollaborationFileProposal[];
 }
 
 export type CollaborationDispatch = (
@@ -193,6 +195,7 @@ export class CollaborationCoordinator {
         completedAt: this.now(),
         providerMessageId: result.providerMessageId,
         conflictFiles: result.conflictFiles,
+        fileProposals: result.fileProposals?.map(proposal => ({ ...proposal })),
       });
     } catch (error) {
       const startedAt = event.delivery[participantId]?.startedAt;

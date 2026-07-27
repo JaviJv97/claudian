@@ -6,6 +6,27 @@ export interface CollaborationFileVersion {
 
 export type CollaborationFileSnapshot = ReadonlyMap<string, string>;
 
+export interface CollaborationFileContentState {
+  revision: string;
+  content: string;
+}
+
+export type CollaborationFileContentSnapshot =
+  ReadonlyMap<string, CollaborationFileContentState>;
+
+export function createCollaborationFileRevision(
+  _mtime: number,
+  size: number,
+  content: string,
+): string {
+  let hash = 2166136261;
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${size}:${(hash >>> 0).toString(16)}`;
+}
+
 export function captureCollaborationFileSnapshot(
   files: readonly CollaborationFileVersion[],
 ): CollaborationFileSnapshot {
@@ -41,4 +62,40 @@ export function findChangedSharedFiles(
   sharedPaths: readonly string[],
 ): string[] {
   return sharedPaths.filter(path => baseline.get(path) !== current.get(path));
+}
+
+export function findStaleFileProposals(
+  baseline: CollaborationFileContentSnapshot,
+  before: CollaborationFileContentSnapshot,
+  after: CollaborationFileContentSnapshot,
+  participantId: string,
+  now = Date.now(),
+): Array<{
+  path: string;
+  participantId: string;
+  baseRevision: string;
+  currentRevision: string;
+  proposedContent: string;
+  createdAt: number;
+}> {
+  const proposals = [];
+  for (const [path, base] of baseline) {
+    const current = before.get(path);
+    const proposed = after.get(path);
+    if (
+      !current
+      || !proposed
+      || current.revision === base.revision
+      || proposed.revision === current.revision
+    ) continue;
+    proposals.push({
+      path,
+      participantId,
+      baseRevision: base.revision,
+      currentRevision: current.revision,
+      proposedContent: proposed.content,
+      createdAt: now,
+    });
+  }
+  return proposals;
 }
