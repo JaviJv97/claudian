@@ -66,6 +66,8 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const expandedTimelineRoomIds = new Set<string>();
+
 export class CollaborationTimeline {
   private readonly rootEl: HTMLElement;
   private readonly timelineEl: HTMLElement;
@@ -318,8 +320,14 @@ export class CollaborationTimeline {
     if (!room || generation !== this.renderGeneration) return;
 
     const liveEvents = this.getLiveAssistantEvents(room);
-    const events = [...room.events, ...liveEvents]
+    const allEvents = [...room.events, ...liveEvents]
       .sort((left, right) => left.createdAt - right.createdAt);
+    const hiddenEventCount = expandedTimelineRoomIds.has(this.options.roomId)
+      ? 0
+      : Math.max(0, allEvents.length - 120);
+    const events = hiddenEventCount > 0
+      ? allEvents.slice(hiddenEventCount)
+      : allEvents;
     this.timelineEl.empty();
 
     if (events.length === 0) {
@@ -329,6 +337,21 @@ export class CollaborationTimeline {
       });
       this.renderRecovery(room);
       return;
+    }
+
+    if (hiddenEventCount > 0) {
+      const earlierButton = this.timelineEl.createEl('button', {
+        cls: 'claudian-collaboration-earlier',
+        text: `Show ${Math.min(120, hiddenEventCount)} earlier messages`,
+        attr: {
+          type: 'button',
+          'aria-label': `${hiddenEventCount} earlier collaboration messages are hidden`,
+        },
+      });
+      earlierButton.addEventListener('click', () => {
+        expandedTimelineRoomIds.add(this.options.roomId);
+        this.scheduleRender();
+      });
     }
 
     for (const event of events) {

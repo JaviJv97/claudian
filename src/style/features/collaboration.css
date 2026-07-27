@@ -536,6 +536,25 @@
   color: var(--text-muted);
   text-align: center;
 }
+
+.claudian-collaboration-earlier {
+  align-self: center;
+  min-height: 36px;
+  margin: 8px auto 14px;
+  padding: 6px 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-earlier:hover,
+.claudian-collaboration-earlier:focus-visible {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
 .claudian-collaboration-room-modal {
   width: min(520px, calc(100vw - 32px));
 }
