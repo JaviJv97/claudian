@@ -167,6 +167,7 @@ export function approveCollaborationWorkQueue(
   const errors = validateCollaborationWorkQueue(queue, participantIds);
   if (errors.length > 0) throw new Error(errors.join('\n'));
   const approved = structuredClone(queue);
+  now = Math.max(now, queue.updatedAt + 1);
   approved.status = 'approved';
   approved.approvedAt = now;
   approved.updatedAt = now;
@@ -183,6 +184,7 @@ export function setCollaborationWorkQueuePaused(
     throw new Error(`Cannot ${paused ? 'pause' : 'resume'} a ${queue.status} queue`);
   }
   const updated = structuredClone(queue);
+  now = Math.max(now, queue.updatedAt + 1);
   updated.status = paused ? 'paused' : 'approved';
   updated.updatedAt = now;
   return updated;
@@ -278,7 +280,7 @@ export function transitionCollaborationTask(
   if (nextStatus === 'ready' && task.attempts >= task.maxAttempts) {
     throw new Error(`${task.id} has exhausted its retry budget`);
   }
-  const now = options.now ?? Date.now();
+  const now = Math.max(options.now ?? Date.now(), queue.updatedAt + 1);
   task.status = nextStatus;
   task.updatedAt = now;
   updated.updatedAt = now;

@@ -1190,7 +1190,11 @@ export class ClaudianView extends ItemView {
                 'failed',
                 { actorId: current.reviewerId },
               );
-              await this.plugin.storage.rooms.updateWorkQueue(room.id, failed);
+              await this.plugin.storage.rooms.updateWorkQueue(
+                room.id,
+                failed,
+                latest.workQueue.updatedAt,
+              );
             }
           }
           new Notice(message);
@@ -1222,7 +1226,11 @@ export class ClaudianView extends ItemView {
             'review',
             { actorId: task.ownerId, evidence },
           );
-          await this.plugin.storage.rooms.updateWorkQueue(room.id, inReview);
+          await this.plugin.storage.rooms.updateWorkQueue(
+            room.id,
+            inReview,
+            latest.workQueue.updatedAt,
+          );
           room.workQueue = structuredClone(inReview);
           this.refreshCollaborationTimelines(room.id);
         } catch (error) {
@@ -1287,7 +1295,11 @@ export class ClaudianView extends ItemView {
               },
             );
           }
-          await this.plugin.storage.rooms.updateWorkQueue(room.id, next);
+          await this.plugin.storage.rooms.updateWorkQueue(
+            room.id,
+            next,
+            latest.workQueue.updatedAt,
+          );
           new Notice(
             review.verdict === 'approve'
               ? `${task.id} approved. Dependencies were updated.`
@@ -1965,13 +1977,28 @@ export class ClaudianView extends ItemView {
             await this.approveCollaborationWorkQueue(roomId);
           },
           onRunWorkTask: async (taskId) => {
-            await this.runCollaborationWorkTask(tab.id, roomId, taskId);
+            try {
+              await this.runCollaborationWorkTask(tab.id, roomId, taskId);
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : `Could not run ${taskId}`);
+              throw error;
+            }
           },
           onRetryWorkTask: async (taskId) => {
-            await this.retryCollaborationWorkTask(roomId, taskId);
+            try {
+              await this.retryCollaborationWorkTask(roomId, taskId);
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : `Could not retry ${taskId}`);
+              throw error;
+            }
           },
           onSetWorkQueuePaused: async (paused) => {
-            await this.setCollaborationWorkQueuePaused(roomId, paused);
+            try {
+              await this.setCollaborationWorkQueuePaused(roomId, paused);
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : 'Could not update the queue');
+              throw error;
+            }
           },
           onRetryApprovedPlan: async (deliberationId) => {
             await this.startApprovedCollaborationPlan(
@@ -2183,7 +2210,11 @@ export class ClaudianView extends ItemView {
         room.workQueue,
         room.participants.map(getCollaborationParticipantId),
       );
-      await this.plugin.storage.rooms.updateWorkQueue(roomId, queue);
+      await this.plugin.storage.rooms.updateWorkQueue(
+        roomId,
+        queue,
+        room.workQueue.updatedAt,
+      );
       new Notice('Task queue approved. Unblocked tasks are ready.');
       this.refreshCollaborationTimelines(roomId);
     } catch (error) {
@@ -2222,7 +2253,11 @@ export class ClaudianView extends ItemView {
       'running',
       { actorId: task.ownerId },
     );
-    await this.plugin.storage.rooms.updateWorkQueue(roomId, running);
+    await this.plugin.storage.rooms.updateWorkQueue(
+      roomId,
+      running,
+      room.workQueue.updatedAt,
+    );
     this.refreshCollaborationTimelines(roomId);
     const synthesis = room.events.find(event => (
       event.deliberationId === room.workQueue?.sourceDeliberationId
@@ -2257,7 +2292,11 @@ export class ClaudianView extends ItemView {
           'failed',
           { actorId: task.reviewerId },
         );
-        await this.plugin.storage.rooms.updateWorkQueue(roomId, failed);
+        await this.plugin.storage.rooms.updateWorkQueue(
+          roomId,
+          failed,
+          latest.workQueue.updatedAt,
+        );
       }
       throw new Error(`Could not route ${task.id}`);
     }
@@ -2274,7 +2313,11 @@ export class ClaudianView extends ItemView {
       'ready',
       { actorId: task.ownerId },
     );
-    await this.plugin.storage.rooms.updateWorkQueue(roomId, ready);
+    await this.plugin.storage.rooms.updateWorkQueue(
+      roomId,
+      ready,
+      room.workQueue.updatedAt,
+    );
     new Notice(`${taskId} is ready for retry (${task.attempts}/${task.maxAttempts} used).`);
     this.refreshCollaborationTimelines(roomId);
   }
@@ -2286,7 +2329,11 @@ export class ClaudianView extends ItemView {
     const room = await this.plugin.storage.rooms.get(roomId);
     if (!room?.workQueue) throw new Error('Work queue not found');
     const queue = setCollaborationWorkQueuePaused(room.workQueue, paused);
-    await this.plugin.storage.rooms.updateWorkQueue(roomId, queue);
+    await this.plugin.storage.rooms.updateWorkQueue(
+      roomId,
+      queue,
+      room.workQueue.updatedAt,
+    );
     new Notice(paused ? 'Task queue paused.' : 'Task queue resumed.');
     this.refreshCollaborationTimelines(roomId);
   }

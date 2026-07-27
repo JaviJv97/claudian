@@ -388,8 +388,11 @@ export class CollaborationTimeline {
     if (events.length === 0) {
       this.timelineEl.createDiv({
         cls: 'claudian-collaboration-empty',
-        text: 'Send a message to begin the room.',
+        text: room.workQueue
+          ? 'This room has no timeline messages yet.'
+          : 'Send a message to begin the room.',
       });
+      this.renderWorkQueue(room);
       this.renderRecovery(room);
       return;
     }
@@ -676,7 +679,11 @@ export class CollaborationTimeline {
         cls: 'claudian-collaboration-work-task-meta',
         text: `${this.getParticipantLabel(task.ownerId)} → ${
           this.getParticipantLabel(task.reviewerId)
-        } · ${task.fileScopes.join(', ')}`,
+        } · ${task.fileScopes.join(', ')}${
+          this.options.participantResourcePolicies[task.ownerId]?.mode === 'preserve'
+            ? ' · owner preserved'
+            : ''
+        }`,
       });
       if (task.dependsOn.length > 0) {
         item.createDiv({

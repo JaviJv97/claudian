@@ -231,9 +231,16 @@ export class CollaborationRoomRepository {
   async updateWorkQueue(
     roomId: string,
     workQueue: CollaborationWorkQueue,
+    expectedQueueUpdatedAt?: number,
     now = Date.now(),
   ): Promise<CollaborationRoom> {
     return this.mutate(roomId, (room) => {
+      if (
+        expectedQueueUpdatedAt !== undefined
+        && room.workQueue?.updatedAt !== expectedQueueUpdatedAt
+      ) {
+        throw new Error('The work queue changed in another tab. Refresh and try again.');
+      }
       room.workQueue = structuredClone(workQueue);
       room.updatedAt = Math.max(room.updatedAt, now, workQueue.updatedAt);
       return room;

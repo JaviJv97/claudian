@@ -1,5 +1,6 @@
 import { CollaborationRoomRepository } from '@/app/collaboration/CollaborationRoomRepository';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
+import type { CollaborationWorkQueue } from '@/core/types';
 
 function createAdapter(): jest.Mocked<VaultFileAdapter> & { files: Map<string, string> } {
   const files = new Map<string, string>();
@@ -24,6 +25,15 @@ function createAdapter(): jest.Mocked<VaultFileAdapter> & { files: Map<string, s
 }
 
 describe('CollaborationRoomRepository', () => {
+  const createQueue = (updatedAt: number): CollaborationWorkQueue => ({
+    version: 1,
+    status: 'approved',
+    sourceDeliberationId: 'delib-1',
+    createdAt: 100,
+    updatedAt,
+    tasks: [],
+  });
+
   it('creates and reloads a durable room', async () => {
     const adapter = createAdapter();
     const repository = new CollaborationRoomRepository(adapter);
@@ -80,6 +90,25 @@ describe('CollaborationRoomRepository', () => {
     const room = await repository.get('room-1');
     expect(room?.events.map(event => event.id)).toEqual(['event-1', 'event-2']);
     expect(room?.updatedAt).toBe(102);
+  });
+
+  it('rejects stale queue writes from another room tab', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({
+      id: 'room-1',
+      title: 'Room',
+      participants: [],
+      now: 100,
+    });
+    await repository.updateWorkQueue('room-1', createQueue(110));
+
+    await expect(repository.updateWorkQueue(
+      'room-1',
+      createQueue(120),
+      100,
+    )).rejects.toThrow('changed in another tab');
+
+    expect((await repository.get('room-1'))?.workQueue?.updatedAt).toBe(110);
   });
 
   it('updates one participant delivery without replacing the others', async () => {

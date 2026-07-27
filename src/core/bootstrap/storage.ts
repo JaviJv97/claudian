@@ -60,6 +60,7 @@ export interface CollaborationRoomStorage {
   updateWorkQueue(
     roomId: string,
     workQueue: CollaborationWorkQueue,
+    expectedQueueUpdatedAt?: number,
     now?: number,
   ): Promise<CollaborationRoom>;
 }
