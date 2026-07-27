@@ -213,6 +213,71 @@ export function updateCollaborationDraftTaskAssignment(
   return updated;
 }
 
+export type CollaborationDraftTaskContractUpdate = Partial<Pick<
+  CollaborationWorkTask,
+  | 'description'
+  | 'title'
+  | 'dependsOn'
+  | 'fileScopes'
+  | 'acceptanceCriteria'
+  | 'verificationCommands'
+  | 'risk'
+  | 'maxAttempts'
+>>;
+
+export function updateCollaborationDraftTaskContract(
+  queue: CollaborationWorkQueue,
+  taskId: string,
+  patch: CollaborationDraftTaskContractUpdate,
+  now = Date.now(),
+): CollaborationWorkQueue {
+  if (queue.status !== 'draft') throw new Error('Only a draft task contract can be edited');
+  const updated = structuredClone(queue);
+  const task = updated.tasks.find(candidate => candidate.id === taskId);
+  if (!task) throw new Error(`Task not found: ${taskId}`);
+  const normalizeList = (values: string[] | undefined): string[] | undefined => (
+    values?.map(value => value.trim()).filter(Boolean)
+  );
+  const fileScopes = normalizeList(patch.fileScopes);
+  const dependsOn = normalizeList(patch.dependsOn);
+  const acceptanceCriteria = normalizeList(patch.acceptanceCriteria);
+  const verificationCommands = normalizeList(patch.verificationCommands);
+  if (fileScopes && fileScopes.length === 0) throw new Error(`${taskId} needs a file scope`);
+  if (acceptanceCriteria && acceptanceCriteria.length === 0) {
+    throw new Error(`${taskId} needs an acceptance criterion`);
+  }
+  if (verificationCommands && verificationCommands.length === 0) {
+    throw new Error(`${taskId} needs a verification command`);
+  }
+  if (patch.maxAttempts !== undefined && (
+    !Number.isInteger(patch.maxAttempts) || patch.maxAttempts < 1 || patch.maxAttempts > 5
+  )) {
+    throw new Error('Retry budget must be between 1 and 5');
+  }
+  if (dependsOn?.includes(taskId)) throw new Error(`${taskId} cannot depend on itself`);
+  if (dependsOn) {
+    const ids = new Set(updated.tasks.map(candidate => candidate.id));
+    const unknown = dependsOn.find(dependency => !ids.has(dependency));
+    if (unknown) throw new Error(`${taskId} has unknown dependency ${unknown}`);
+  }
+  now = Math.max(now, queue.updatedAt + 1);
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title) throw new Error(`${taskId} needs a title`);
+    task.title = title;
+  }
+  if (patch.description !== undefined) task.description = patch.description.trim();
+  if (dependsOn) task.dependsOn = dependsOn;
+  if (fileScopes) task.fileScopes = fileScopes;
+  if (acceptanceCriteria) task.acceptanceCriteria = acceptanceCriteria;
+  if (verificationCommands) task.verificationCommands = verificationCommands;
+  if (patch.risk) task.risk = patch.risk;
+  if (patch.maxAttempts !== undefined) task.maxAttempts = patch.maxAttempts;
+  task.updatedAt = now;
+  updated.updatedAt = now;
+  return updated;
+}
+
 export function findCollaborationTaskScopeConflicts(
   queue: CollaborationWorkQueue,
 ): CollaborationTaskScopeConflict[] {

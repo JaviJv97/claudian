@@ -11,6 +11,7 @@ import type {
   CollaborationParticipantResourcePolicy,
   CollaborationResourceUsageSnapshot,
   CollaborationRoom,
+  CollaborationWorkTask,
   ProviderId,
 } from '../../../core/types';
 import type { FeatureHost } from '../../FeatureHost';
@@ -57,6 +58,20 @@ interface CollaborationTimelineOptions {
     taskId: string,
     ownerId: string,
     reviewerId: string,
+  ) => Promise<void>;
+  onUpdateDraftTaskContract: (
+    taskId: string,
+    patch: Partial<Pick<
+      CollaborationWorkTask,
+      | 'description'
+      | 'title'
+      | 'dependsOn'
+      | 'fileScopes'
+      | 'acceptanceCriteria'
+      | 'verificationCommands'
+      | 'risk'
+      | 'maxAttempts'
+    >>,
   ) => Promise<void>;
   onRetryApprovedPlan: (deliberationId: string) => Promise<void>;
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
@@ -783,6 +798,74 @@ export class CollaborationTimeline {
         cls: 'claudian-collaboration-work-task-retries',
         text: `${task.attempts}/${task.maxAttempts} attempts used`,
       });
+      if (queue.status === 'draft') {
+        const editor = contract.createDiv({
+          cls: 'claudian-collaboration-work-task-contract-editor',
+        });
+        const createTextarea = (label: string, value: string): HTMLTextAreaElement => {
+          const wrapper = editor.createEl('label');
+          wrapper.createSpan({ text: label });
+          const textarea = wrapper.createEl('textarea', {
+            attr: { rows: '3' },
+          });
+          textarea.value = value;
+          return textarea;
+        };
+        const description = createTextarea('Description', task.description);
+        const title = createTextarea('Title', task.title);
+        title.rows = 1;
+        const dependencies = createTextarea(
+          'Dependencies · task IDs, one per line',
+          task.dependsOn.join('\n'),
+        );
+        const scopes = createTextarea('File scopes · one per line', task.fileScopes.join('\n'));
+        const criteria = createTextarea(
+          'Acceptance criteria · one per line',
+          task.acceptanceCriteria.join('\n'),
+        );
+        const verification = createTextarea(
+          'Verification commands · one per line',
+          task.verificationCommands.join('\n'),
+        );
+        const compact = editor.createDiv({
+          cls: 'claudian-collaboration-work-task-contract-compact',
+        });
+        const riskLabel = compact.createEl('label');
+        riskLabel.createSpan({ text: 'Risk' });
+        const risk = riskLabel.createEl('select');
+        for (const value of ['low', 'medium', 'high'] as const) {
+          const option = risk.createEl('option', { text: value, attr: { value } });
+          option.selected = task.risk === value;
+        }
+        const attemptsLabel = compact.createEl('label');
+        attemptsLabel.createSpan({ text: 'Max attempts' });
+        const attempts = attemptsLabel.createEl('input', {
+          type: 'number',
+          attr: { min: '1', max: '5', value: String(task.maxAttempts) },
+        });
+        const save = editor.createEl('button', {
+          text: 'Save contract',
+          attr: { type: 'button' },
+        });
+        save.addEventListener('click', () => {
+          save.disabled = true;
+          save.setText('Saving…');
+          const lines = (value: string) => value.split('\n').map(line => line.trim());
+          void this.options.onUpdateDraftTaskContract(task.id, {
+            title: title.value,
+            description: description.value,
+            dependsOn: lines(dependencies.value),
+            fileScopes: lines(scopes.value),
+            acceptanceCriteria: lines(criteria.value),
+            verificationCommands: lines(verification.value),
+            risk: risk.value as CollaborationWorkTask['risk'],
+            maxAttempts: Number(attempts.value),
+          }).catch(() => {
+            save.disabled = false;
+            save.setText('Save contract');
+          });
+        });
+      }
       if (
         queue.status === 'approved'
         && (task.status === 'ready' || task.status === 'failed')

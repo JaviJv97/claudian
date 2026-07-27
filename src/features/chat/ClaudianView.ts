@@ -34,10 +34,12 @@ import {
 } from '../../core/collaboration/collaborationWorkflow';
 import {
   approveCollaborationWorkQueue,
+  type CollaborationDraftTaskContractUpdate,
   parseCollaborationTaskGraph,
   setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
   updateCollaborationDraftTaskAssignment,
+  updateCollaborationDraftTaskContract,
 } from '../../core/collaboration/collaborationWorkQueue';
 import { StartupProfiler } from '../../core/performance/StartupProfiler';
 import { getHiddenProviderCommandSet } from '../../core/providers/commands/hiddenCommands';
@@ -2024,6 +2026,16 @@ export class ClaudianView extends ItemView {
               throw error;
             }
           },
+          onUpdateDraftTaskContract: async (taskId, patch) => {
+            try {
+              await this.updateCollaborationDraftTaskContract(roomId, taskId, patch);
+            } catch (error) {
+              new Notice(
+                error instanceof Error ? error.message : `Could not update ${taskId}`,
+              );
+              throw error;
+            }
+          },
           onRetryApprovedPlan: async (deliberationId) => {
             await this.startApprovedCollaborationPlan(
               tab.id,
@@ -2409,6 +2421,26 @@ export class ClaudianView extends ItemView {
       room.participants
         .filter(participant => participant.resourcePolicy?.mode !== 'unavailable')
         .map(getCollaborationParticipantId),
+    );
+    await this.plugin.storage.rooms.updateWorkQueue(
+      roomId,
+      queue,
+      room.workQueue.updatedAt,
+    );
+    this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async updateCollaborationDraftTaskContract(
+    roomId: string,
+    taskId: string,
+    patch: CollaborationDraftTaskContractUpdate,
+  ): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    const queue = updateCollaborationDraftTaskContract(
+      room.workQueue,
+      taskId,
+      patch,
     );
     await this.plugin.storage.rooms.updateWorkQueue(
       roomId,

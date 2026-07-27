@@ -5,6 +5,7 @@ import {
   setCollaborationWorkQueuePaused,
   transitionCollaborationTask,
   updateCollaborationDraftTaskAssignment,
+  updateCollaborationDraftTaskContract,
   validateCollaborationWorkQueue,
 } from '@/core/collaboration/collaborationWorkQueue';
 import type { CollaborationWorkQueue } from '@/core/types';
@@ -128,6 +129,31 @@ describe('collaboration work queue', () => {
       'company',
       participants,
     )).toThrow('must differ');
+  });
+
+  it('lets a human repair a draft task contract before approval', () => {
+    const updated = updateCollaborationDraftTaskContract(queue(), 'TASK-001', {
+      title: 'Persist queue atomically',
+      description: 'Persist the queue atomically.',
+      dependsOn: [],
+      fileScopes: ['src/core/**', 'tests/unit/core/**'],
+      acceptanceCriteria: ['Queue survives restart', 'Stale writes fail'],
+      verificationCommands: ['npm run typecheck', 'npm test'],
+      risk: 'high',
+      maxAttempts: 3,
+    }, 20);
+
+    expect(updated.tasks[0]).toMatchObject({
+      description: 'Persist the queue atomically.',
+      title: 'Persist queue atomically',
+      fileScopes: ['src/core/**', 'tests/unit/core/**'],
+      risk: 'high',
+      maxAttempts: 3,
+      updatedAt: 20,
+    });
+    expect(() => updateCollaborationDraftTaskContract(updated, 'TASK-001', {
+      verificationCommands: [],
+    })).toThrow('verification command');
   });
 
   it('rejects unknown dependencies, cycles, and same-person review', () => {
