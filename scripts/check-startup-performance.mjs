@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mainPath = path.join(root, 'main.js');
 const requiredArtifacts = ['main.js', 'manifest.json', 'styles.css'];
-const mainBudgetBytes = 3_400_000;
+// Includes the durable collaboration queue, evidence, and recovery runtime added in 2.0.41.
+// Keep this narrow: the current production bundle retains less than 8 KB of headroom.
+const mainBudgetBytes = 3_425_000;
 const evaluationIndicatorMs = 50;
 
 for (const relativePath of requiredArtifacts) {
