@@ -1,6 +1,10 @@
 import type { Component } from 'obsidian';
 import { MarkdownRenderer, setIcon } from 'obsidian';
 
+import {
+  getQuotaRoutingRecommendation,
+  isQuotaSnapshotStale,
+} from '../../../core/collaboration/collaborationResourcePolicy';
 import type {
   CollaborationDiscussionMode,
   CollaborationEvent,
@@ -47,6 +51,8 @@ interface CollaborationTimelineOptions {
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
   onRequestWorkflowChanges: (workflowId: string, deliberationId: string) => Promise<void>;
   onEditResourcePolicy: (participantId: ProviderId) => void;
+  onApplyQuotaRecommendation: (participantId: ProviderId) => Promise<void>;
+  onOpenUsageDashboard: () => void;
   onReview: (
     reviewerId: ProviderId,
     sourceProviderId: ProviderId,
@@ -153,6 +159,15 @@ export class CollaborationTimeline {
       cls: 'claudian-collaboration-roster-members',
       text: participantIds.map(id => this.getParticipantLabel(id)).join(' · '),
     });
+    const usageButton = rosterEl.createEl('button', {
+      cls: 'claudian-collaboration-usage-overview',
+      text: 'Usage overview',
+      attr: {
+        type: 'button',
+        'aria-label': 'Open collaboration usage overview',
+      },
+    });
+    usageButton.addEventListener('click', () => this.options.onOpenUsageDashboard());
     const modeEl = rosterEl.createDiv({
       cls: 'claudian-collaboration-modes',
       attr: { role: 'group', 'aria-label': 'Discussion mode' },
@@ -212,6 +227,41 @@ export class CollaborationTimeline {
             }
           })
           .finally(() => { button.disabled = false; });
+      });
+    }
+
+    const recommendations = participantIds.flatMap((participantId) => {
+      const recommendation = getQuotaRoutingRecommendation(
+        this.options.participantResourcePolicies[participantId],
+      );
+      return recommendation ? [{ participantId, recommendation }] : [];
+    });
+    if (recommendations.length > 0) {
+      const recommendationEl = containerEl.createDiv({
+        cls: 'claudian-collaboration-quota-recommendation',
+        attr: {
+          role: 'status',
+          'aria-label': 'Quota routing recommendation',
+        },
+      });
+      const recommendation = recommendations[0];
+      recommendationEl.createSpan({
+        text: `${this.getParticipantLabel(recommendation.participantId)}: ${
+          recommendation.recommendation.reason
+        }`,
+      });
+      const applyButton = recommendationEl.createEl('button', {
+        text: 'Apply preserve mode',
+        attr: { type: 'button' },
+      });
+      applyButton.addEventListener('click', () => {
+        applyButton.disabled = true;
+        applyButton.setText('Applying…');
+        void this.options.onApplyQuotaRecommendation(recommendation.participantId)
+          .finally(() => {
+            applyButton.disabled = false;
+            applyButton.setText('Apply preserve mode');
+          });
       });
     }
 
@@ -832,6 +882,8 @@ export class CollaborationTimeline {
           contextUsage?.percentage ?? persistedUsage?.contextPercent,
         ));
         resourceEl.dataset.mode = policy?.mode ?? 'active';
+        const stale = !!policy?.quotaSnapshot && isQuotaSnapshotStale(policy.quotaSnapshot);
+        resourceEl.dataset.stale = stale ? 'true' : 'false';
         resourceEl.setAttribute(
           'title',
           [
@@ -843,14 +895,17 @@ export class CollaborationTimeline {
                 ? `${policy.weeklyUsagePercent}% manually reported weekly usage`
               : 'Weekly usage not set',
             policy?.quotaSnapshot
-              ? `Provider snapshot ${new Date(policy.quotaSnapshot.fetchedAt).toLocaleString()}`
+              ? `Provider snapshot ${new Date(policy.quotaSnapshot.fetchedAt).toLocaleString()}${
+                stale ? ' (stale)' : ''
+              }`
               : 'No provider snapshot',
+            policy?.quotaRefreshError ? `Last refresh failed: ${policy.quotaRefreshError}` : '',
             contextUsage
               ? `${contextUsage.contextTokens.toLocaleString()} context tokens`
               : persistedUsage
                 ? `${persistedUsage.contextTokens.toLocaleString()} context tokens (last workflow)`
                 : 'Context usage unavailable',
-          ].join(' · '),
+          ].filter(Boolean).join(' · '),
         );
       }
     }
@@ -874,11 +929,14 @@ export class CollaborationTimeline {
       : contextPercent !== undefined
         ? `${contextPercent}% context`
         : 'Usage';
+    const labeled = policy?.quotaSnapshot && isQuotaSnapshotStale(policy.quotaSnapshot)
+      ? `${usage} · stale`
+      : usage;
     return policy?.mode === 'preserve'
-      ? `${usage} · preserve`
+      ? `${labeled} · preserve`
       : policy?.mode === 'unavailable'
-        ? `${usage} · unavailable`
-        : usage;
+        ? `${labeled} · unavailable`
+        : labeled;
   }
 
   private getTabParticipantId(tab: TabData): string {

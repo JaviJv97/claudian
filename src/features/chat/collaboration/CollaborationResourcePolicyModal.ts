@@ -87,6 +87,8 @@ export class CollaborationResourcePolicyModal extends Modal {
             mode: this.mode,
             weeklyUsagePercent: this.weeklyUsagePercent,
             quotaSnapshot: this.current?.quotaSnapshot,
+            quotaHistory: this.current?.quotaHistory,
+            quotaRefreshError: this.current?.quotaRefreshError,
           });
           this.close();
         }));

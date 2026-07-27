@@ -69,6 +69,14 @@ export interface CollaborationParticipantResourcePolicy {
   weeklyUsagePercent?: number;
   /** Last provider-reported account snapshot. Safe to persist; contains no credentials. */
   quotaSnapshot?: ProviderQuotaSnapshot;
+  /** Bounded, credential-free samples used for local trends and projections. */
+  quotaHistory?: CollaborationQuotaHistoryPoint[];
+  quotaRefreshError?: string;
+}
+
+export interface CollaborationQuotaHistoryPoint {
+  fetchedAt: number;
+  windows: ProviderQuotaSnapshot['windows'];
 }
 
 export interface CollaborationDelivery {

@@ -8,6 +8,7 @@ import {
   evaluateDeliberationConsensus,
 } from '../../core/collaboration/collaborationDeliberation';
 import {
+  appendQuotaHistory,
   getPreservedMentionedParticipantIds,
   getRoutableCollaborationParticipantIds,
   getUnavailableMentionedParticipantIds,
@@ -70,6 +71,7 @@ import {
 } from './collaboration/CollaborationRoomModal';
 import { groupCollaborationTabBarItems } from './collaboration/collaborationTabs';
 import { CollaborationTimeline } from './collaboration/CollaborationTimeline';
+import { CollaborationUsageDashboardModal } from './collaboration/CollaborationUsageDashboardModal';
 import type { HistoryConversationStatus } from './controllers/ConversationController';
 import { MentionCacheCoordinator } from './services/MentionCacheCoordinator';
 import { TabStatePersistenceCoordinator } from './services/TabStatePersistenceCoordinator';
@@ -131,6 +133,8 @@ export class ClaudianView extends ItemView {
   private collaborationTimelines = new Map<TabId, CollaborationTimeline>();
   private collaborationReconcileQueue: Promise<void> = Promise.resolve();
   private activeCollaborationDeliveries = new Map<string, string>();
+  private quotaRefreshInterval: number | null = null;
+  private quotaRefreshFlights = new Map<string, Promise<void>>();
 
   constructor(leaf: WorkspaceLeaf, plugin: FeatureHost) {
     super(leaf);
@@ -352,6 +356,7 @@ export class ClaudianView extends ItemView {
     this.wireEventHandlers();
     await this.restoreOrCreateTabs();
     await this.reconcileCollaborationTimelines();
+    this.startQuotaRefreshSchedule();
     this.syncProviderBrandColor();
     this.attachNavRowContentToInputFooter();
     this.updateInputLocation();
@@ -360,6 +365,10 @@ export class ClaudianView extends ItemView {
 
   async onClose() {
     this.cancelHistoryRendering();
+    if (this.quotaRefreshInterval !== null) {
+      window.clearInterval(this.quotaRefreshInterval);
+      this.quotaRefreshInterval = null;
+    }
     if (this.pendingTabBarUpdate !== null) {
       cancelScheduledAnimationFrame(this.pendingTabBarUpdate);
       this.pendingTabBarUpdate = null;
@@ -371,6 +380,7 @@ export class ClaudianView extends ItemView {
     this.eventRefs = [];
     for (const timeline of this.collaborationTimelines?.values() ?? []) timeline.destroy();
     this.collaborationTimelines?.clear();
+    this.quotaRefreshFlights?.clear();
 
     try {
       await this.persistTabStateImmediate();
@@ -1422,6 +1432,154 @@ export class ClaudianView extends ItemView {
     return operation;
   }
 
+  private startQuotaRefreshSchedule(): void {
+    if (this.quotaRefreshInterval != null) return;
+    void this.refreshOpenCollaborationQuotas(false);
+    this.quotaRefreshInterval = window.setInterval(() => {
+      void this.refreshOpenCollaborationQuotas(false);
+    }, 5 * 60 * 1_000);
+    (this.quotaRefreshInterval as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private async refreshOpenCollaborationQuotas(announce: boolean): Promise<void> {
+    const roomIds = new Set(
+      (this.tabManager?.getAllTabs() ?? []).flatMap((tab) => {
+        const membership = tab.conversationId
+          ? this.plugin.getConversationSync(tab.conversationId)?.collaboration
+          : undefined;
+        return membership ? [membership.roomId] : [];
+      }),
+    );
+    for (const roomId of roomIds) {
+      const room = await this.plugin.storage.rooms.get(roomId);
+      if (!room || room.status === 'archived') continue;
+      await Promise.all(room.participants.map(participant => (
+        this.refreshCollaborationParticipantQuota(
+          roomId,
+          getCollaborationParticipantId(participant),
+          announce,
+        ).catch(() => undefined)
+      )));
+      await this.reconcileCollaborationTimelines();
+    }
+  }
+
+  private refreshCollaborationParticipantQuota(
+    roomId: string,
+    participantId: string,
+    announce: boolean,
+  ): Promise<void> {
+    const key = `${roomId}:${participantId}`;
+    this.quotaRefreshFlights ??= new Map();
+    const existing = this.quotaRefreshFlights.get(key);
+    if (existing) return existing;
+    const operation = this.performCollaborationParticipantQuotaRefresh(
+      roomId,
+      participantId,
+      announce,
+    ).finally(() => {
+      if (this.quotaRefreshFlights.get(key) === operation) {
+        this.quotaRefreshFlights.delete(key);
+      }
+    });
+    this.quotaRefreshFlights.set(key, operation);
+    return operation;
+  }
+
+  private async performCollaborationParticipantQuotaRefresh(
+    roomId: string,
+    participantId: string,
+    announce: boolean,
+  ): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    const participant = room?.participants.find(candidate => (
+      getCollaborationParticipantId(candidate) === participantId
+    ));
+    if (!room || !participant) throw new Error('Collaboration participant not found.');
+    const participantTab = this.tabManager?.getAllTabs().find(candidate => (
+      candidate.conversationId === participant.conversationId
+    ));
+    if (!participantTab) throw new Error('Participant tab is unavailable.');
+
+    try {
+      if (
+        !participantTab.service
+        || !participantTab.serviceInitialized
+        || participantTab.service.runtimeProfileId !== participant.runtimeProfileId
+      ) {
+        await initializeTabService(participantTab, this.plugin);
+        setupServiceCallbacks(participantTab, this.plugin);
+      }
+      const runtime = participantTab.service;
+      if (!runtime?.getQuotaSnapshot) {
+        throw new Error(`${participant.label ?? participantId} does not expose account quota.`);
+      }
+      let quotaSnapshot;
+      try {
+        await runtime.ensureReady();
+        quotaSnapshot = await runtime.getQuotaSnapshot();
+      } catch (initialError) {
+        const conversation = this.plugin.getConversationSync(participant.conversationId);
+        if (!conversation?.sessionId) throw initialError;
+        runtime.resetSession();
+        try {
+          await runtime.ensureReady();
+          quotaSnapshot = await runtime.getQuotaSnapshot();
+        } finally {
+          runtime.syncConversationState(
+            conversation,
+            conversation.externalContextPaths ?? [],
+          );
+        }
+      }
+      const latestRoom = await this.plugin.storage.rooms.get(roomId);
+      const latestParticipant = latestRoom?.participants.find(candidate => (
+        getCollaborationParticipantId(candidate) === participantId
+      ));
+      const currentPolicy = latestParticipant?.resourcePolicy ?? participant.resourcePolicy;
+      const weeklyWindow = quotaSnapshot.windows.find(window => (
+        window.id === 'seven-day' || window.id === 'secondary'
+      ));
+      await this.plugin.storage.rooms.updateParticipantResourcePolicy(
+        roomId,
+        participantId,
+        {
+          mode: currentPolicy?.mode ?? 'active',
+          weeklyUsagePercent: weeklyWindow?.utilizationPercent
+            ?? currentPolicy?.weeklyUsagePercent,
+          quotaSnapshot,
+          quotaHistory: appendQuotaHistory(currentPolicy?.quotaHistory, {
+            fetchedAt: quotaSnapshot.fetchedAt,
+            windows: quotaSnapshot.windows.map(window => ({ ...window })),
+          }),
+        },
+      );
+      if (announce) {
+        new Notice(
+          quotaSnapshot.windows.length > 0
+            ? `${participant.label ?? participantId} quota refreshed.`
+            : quotaSnapshot.unavailableReason ?? 'Provider quota is unavailable.',
+        );
+      }
+    } catch (error) {
+      const latestRoom = await this.plugin.storage.rooms.get(roomId);
+      const latestParticipant = latestRoom?.participants.find(candidate => (
+        getCollaborationParticipantId(candidate) === participantId
+      ));
+      const message = error instanceof Error ? error.message : 'Could not refresh provider quota.';
+      await this.plugin.storage.rooms.updateParticipantResourcePolicy(
+        roomId,
+        participantId,
+        {
+          ...(latestParticipant?.resourcePolicy ?? participant.resourcePolicy ?? { mode: 'active' }),
+          quotaRefreshError: message,
+        },
+      );
+      if (announce) new Notice(message);
+      throw error;
+    }
+  }
+
   private async performCollaborationTimelineReconciliation(): Promise<void> {
     // Some lightweight test hosts construct the view without running field initializers.
     if (!this.collaborationTimelines) return;
@@ -1709,56 +1867,65 @@ export class ClaudianView extends ItemView {
                   });
               },
               async () => {
-                const participantTab = roomTabs.find(candidate => (
-                  candidate.conversationId === participant.conversationId
-                ));
-                if (!participantTab) {
-                  new Notice(`${participant.label ?? participantId} tab is unavailable.`);
-                  throw new Error('Participant tab is unavailable.');
-                }
-                if (
-                  !participantTab.service
-                  || !participantTab.serviceInitialized
-                  || participantTab.service.runtimeProfileId !== participant.runtimeProfileId
-                ) {
-                  await initializeTabService(participantTab, this.plugin);
-                  setupServiceCallbacks(participantTab, this.plugin);
-                }
-                const runtime = participantTab.service;
-                if (!runtime?.getQuotaSnapshot) {
-                  new Notice(`${participant.label ?? participantId} does not expose account quota.`);
-                  throw new Error('Provider quota is unavailable.');
-                }
-                try {
-                  await runtime.ensureReady();
-                  const quotaSnapshot = await runtime.getQuotaSnapshot();
-                  const weeklyWindow = quotaSnapshot.windows.find(window => (
-                    window.id === 'seven-day' || window.id === 'secondary'
-                  ));
-                  await this.plugin.storage.rooms.updateParticipantResourcePolicy(
-                    roomId,
-                    participantId,
-                    {
-                      mode: participant.resourcePolicy?.mode ?? 'active',
-                      weeklyUsagePercent: weeklyWindow?.utilizationPercent
-                        ?? participant.resourcePolicy?.weeklyUsagePercent,
-                      quotaSnapshot,
-                    },
-                  );
-                  await this.reconcileCollaborationTimelines();
-                  new Notice(
-                    quotaSnapshot.windows.length > 0
-                      ? `${participant.label ?? participantId} quota refreshed.`
-                      : quotaSnapshot.unavailableReason ?? 'Provider quota is unavailable.',
-                  );
-                } catch (error) {
-                  new Notice(
-                    error instanceof Error ? error.message : 'Could not refresh provider quota.',
-                  );
-                  throw error;
-                }
+                await this.refreshCollaborationParticipantQuota(
+                  roomId,
+                  participantId,
+                  true,
+                );
+                await this.reconcileCollaborationTimelines();
               },
             ).open();
+          },
+          onApplyQuotaRecommendation: async (participantId) => {
+            const latestRoom = await this.plugin.storage.rooms.get(roomId);
+            const latestParticipant = latestRoom?.participants.find(candidate => (
+              getCollaborationParticipantId(candidate) === participantId
+            ));
+            if (!latestParticipant) throw new Error('Collaboration participant not found.');
+            await this.plugin.storage.rooms.updateParticipantResourcePolicy(
+              roomId,
+              participantId,
+              {
+                ...(latestParticipant.resourcePolicy ?? {}),
+                mode: 'preserve',
+              },
+            );
+            await this.reconcileCollaborationTimelines();
+            new Notice(`${latestParticipant.label ?? participantId} set to preserve mode.`);
+          },
+          onOpenUsageDashboard: () => {
+            new CollaborationUsageDashboardModal(this.plugin, {
+              roomId,
+              loadRoom: () => this.plugin.storage.rooms.get(roomId),
+              refreshAll: async () => {
+                const latestRoom = await this.plugin.storage.rooms.get(roomId);
+                if (!latestRoom) return;
+                await Promise.all(latestRoom.participants.map(participant => (
+                  this.refreshCollaborationParticipantQuota(
+                    roomId,
+                    getCollaborationParticipantId(participant),
+                    false,
+                  ).catch(() => undefined)
+                )));
+                await this.reconcileCollaborationTimelines();
+              },
+              applyRecommendation: async (participantId) => {
+                const latestRoom = await this.plugin.storage.rooms.get(roomId);
+                const latestParticipant = latestRoom?.participants.find(candidate => (
+                  getCollaborationParticipantId(candidate) === participantId
+                ));
+                if (!latestParticipant) return;
+                await this.plugin.storage.rooms.updateParticipantResourcePolicy(
+                  roomId,
+                  participantId,
+                  {
+                    ...(latestParticipant.resourcePolicy ?? {}),
+                    mode: 'preserve',
+                  },
+                );
+                await this.reconcileCollaborationTimelines();
+              },
+            }).open();
           },
           onReview: async (reviewerId, sourceProviderId, content) => {
             const sourceParticipant = room.participants.find(participant => (

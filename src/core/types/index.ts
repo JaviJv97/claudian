@@ -25,6 +25,7 @@ export {
   type CollaborationMembership,
   type CollaborationParticipant,
   type CollaborationParticipantResourcePolicy,
+  type CollaborationQuotaHistoryPoint,
   type CollaborationRecipientId,
   type CollaborationResourceUsageSnapshot,
   type CollaborationRoom,

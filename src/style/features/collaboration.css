@@ -41,15 +41,58 @@
   white-space: nowrap;
 }
 
+.claudian-collaboration-usage-overview {
+  min-height: 28px;
+  margin-inline-start: auto;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-usage-overview:hover,
+.claudian-collaboration-usage-overview:focus-visible {
+  border-color: var(--background-modifier-border-hover);
+  color: var(--text-normal);
+}
+
 .claudian-collaboration-modes {
   display: inline-flex;
   flex: 0 0 auto;
   gap: 2px;
-  margin-inline-start: auto;
   padding: 2px;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: var(--background-secondary);
+}
+
+.claudian-collaboration-quota-recommendation {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: rgba(var(--color-yellow-rgb), 0.08);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-collaboration-quota-recommendation > span {
+  flex: 1;
+}
+
+.claudian-collaboration-quota-recommendation button {
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-color: var(--color-yellow);
+  background: transparent;
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
 }
 
 .claudian-collaboration-mode {
@@ -109,6 +152,10 @@
 .claudian-collaboration-resource[data-mode="unavailable"] {
   border-color: var(--background-modifier-border);
   color: var(--text-error);
+}
+
+.claudian-collaboration-resource[data-stale="true"] {
+  border-style: dashed;
 }
 
 .claudian-collaboration-resource:hover,
