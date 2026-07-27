@@ -48,6 +48,27 @@ describe('collaboration deliberation', () => {
     expect(instruction).toContain('personal, company, codex');
   });
 
+  it('exposes account-specific resource policy to the synthesizer', () => {
+    const resourceRoom: CollaborationRoom = structuredClone(room);
+    resourceRoom.participants[0].resourcePolicy = {
+      mode: 'preserve',
+      weeklyUsagePercent: 97,
+    };
+    resourceRoom.participants[1].resourcePolicy = { mode: 'active' };
+
+    const instruction = buildDeliberationInstruction(
+      resourceRoom,
+      'synthesis',
+      'Build the feature',
+      'd-1',
+      'codex',
+    );
+
+    expect(instruction).toContain('personal: preserve · 97% week');
+    expect(instruction).toContain('Do not assign unavailable participants');
+    expect(instruction).toContain('Avoid preserve participants');
+  });
+
   it('requires explicit unanimous approval and preserves objections', () => {
     const events = [
       ['personal', 'APPROVE Good synthesis'],

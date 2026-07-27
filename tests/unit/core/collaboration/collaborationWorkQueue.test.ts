@@ -177,4 +177,33 @@ describe('collaboration work queue', () => {
       },
     })).toThrow('outside its allowed file scopes');
   });
+
+  it('recovers an interrupted running task through failed and respects retry budget', () => {
+    const approved = approveCollaborationWorkQueue(queue(), participants, 20);
+    const running = transitionCollaborationTask(approved, 'TASK-001', 'running', {
+      actorId: 'codex',
+      now: 21,
+    });
+    const failed = transitionCollaborationTask(running, 'TASK-001', 'failed', {
+      actorId: 'system',
+      now: 22,
+    });
+    const ready = transitionCollaborationTask(failed, 'TASK-001', 'ready', {
+      actorId: 'codex',
+      now: 23,
+    });
+    const secondRun = transitionCollaborationTask(ready, 'TASK-001', 'running', {
+      actorId: 'codex',
+      now: 24,
+    });
+    const secondFailure = transitionCollaborationTask(secondRun, 'TASK-001', 'failed', {
+      actorId: 'system',
+      now: 25,
+    });
+
+    expect(() => transitionCollaborationTask(secondFailure, 'TASK-001', 'ready', {
+      actorId: 'codex',
+      now: 26,
+    })).toThrow('exhausted its retry budget');
+  });
 });

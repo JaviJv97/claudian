@@ -1992,6 +1992,14 @@ export class ClaudianView extends ItemView {
               throw error;
             }
           },
+          onRecoverWorkTask: async (taskId) => {
+            try {
+              await this.recoverCollaborationWorkTask(roomId, taskId);
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : `Could not recover ${taskId}`);
+              throw error;
+            }
+          },
           onSetWorkQueuePaused: async (paused) => {
             try {
               await this.setCollaborationWorkQueuePaused(roomId, paused);
@@ -2208,7 +2216,9 @@ export class ClaudianView extends ItemView {
     try {
       const queue = approveCollaborationWorkQueue(
         room.workQueue,
-        room.participants.map(getCollaborationParticipantId),
+        room.participants
+          .filter(participant => participant.resourcePolicy?.mode !== 'unavailable')
+          .map(getCollaborationParticipantId),
       );
       await this.plugin.storage.rooms.updateWorkQueue(
         roomId,
@@ -2319,6 +2329,35 @@ export class ClaudianView extends ItemView {
       room.workQueue.updatedAt,
     );
     new Notice(`${taskId} is ready for retry (${task.attempts}/${task.maxAttempts} used).`);
+    this.refreshCollaborationTimelines(roomId);
+  }
+
+  private async recoverCollaborationWorkTask(roomId: string, taskId: string): Promise<void> {
+    const room = await this.plugin.storage.rooms.get(roomId);
+    if (!room?.workQueue) throw new Error('Work queue not found');
+    const task = room.workQueue.tasks.find(candidate => candidate.id === taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    if (task.status !== 'running' && task.status !== 'review') {
+      throw new Error(`${taskId} is not interrupted`);
+    }
+    const participantId = task.status === 'running' ? task.ownerId : task.reviewerId;
+    if (this.activeCollaborationDeliveries.has(
+      this.getCollaborationDeliveryKey(roomId, participantId),
+    )) {
+      throw new Error(`${taskId} is still active; stop the agent before recovery`);
+    }
+    const failed = transitionCollaborationTask(
+      room.workQueue,
+      taskId,
+      'failed',
+      { actorId: 'system' },
+    );
+    await this.plugin.storage.rooms.updateWorkQueue(
+      roomId,
+      failed,
+      room.workQueue.updatedAt,
+    );
+    new Notice(`${taskId} recovered as failed. Retry it when ready.`);
     this.refreshCollaborationTimelines(roomId);
   }
 

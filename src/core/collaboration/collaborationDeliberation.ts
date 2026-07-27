@@ -50,6 +50,15 @@ export function buildDeliberationInstruction(
           `Use only these participant IDs for ownership and review: ${room.participants.map(
             participant => getCollaborationParticipantId(participant),
           ).join(', ')}.`,
+          `Participant resource policies:\n${room.participants.map((participant) => {
+            const policy = participant.resourcePolicy;
+            return `- ${getCollaborationParticipantId(participant)}: ${
+              policy?.mode ?? 'active'
+            }${policy?.weeklyUsagePercent !== undefined
+              ? ` · ${policy.weeklyUsagePercent}% week`
+              : ''}`;
+          }).join('\n')}`,
+          'Do not assign unavailable participants. Avoid preserve participants unless the task explicitly requires them and no active participant can safely own or review it.',
           'End with exactly one fenced JSON block using this schema:',
           '```task-graph',
           '{"tasks":[{"id":"TASK-001","title":"Short title","description":"Bounded deliverable","ownerId":"participant-id","reviewerId":"different-participant-id","dependsOn":[],"fileScopes":["path/**"],"acceptanceCriteria":["observable result"],"verificationCommands":["exact command"],"risk":"low|medium|high"}]}',

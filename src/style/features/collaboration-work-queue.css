@@ -81,13 +81,34 @@
   margin-top: var(--size-4-2);
 }
 
-.claudian-collaboration-work-task-evidence {
+.claudian-collaboration-work-task-evidence,
+.claudian-collaboration-work-task-contract {
   margin-top: var(--size-4-2);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
 
-.claudian-collaboration-work-task-evidence summary {
+.claudian-collaboration-work-task-evidence summary,
+.claudian-collaboration-work-task-contract summary {
   cursor: pointer;
   color: var(--text-accent);
+}
+
+.claudian-collaboration-work-task-contract ul {
+  margin: var(--size-4-1) 0;
+  padding-inline-start: var(--size-4-4);
+}
+
+.claudian-collaboration-work-task-commands {
+  display: grid;
+  gap: 2px;
+}
+
+.claudian-collaboration-work-task-commands code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.claudian-collaboration-work-task-retries {
+  margin-top: var(--size-4-1);
 }

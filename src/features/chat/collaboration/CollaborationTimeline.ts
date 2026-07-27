@@ -51,6 +51,7 @@ interface CollaborationTimelineOptions {
   onApproveWorkQueue: () => Promise<void>;
   onRunWorkTask: (taskId: string) => Promise<void>;
   onRetryWorkTask: (taskId: string) => Promise<void>;
+  onRecoverWorkTask: (taskId: string) => Promise<void>;
   onSetWorkQueuePaused: (paused: boolean) => Promise<void>;
   onRetryApprovedPlan: (deliberationId: string) => Promise<void>;
   onApproveWorkflow: (workflowId: string, deliberationId: string) => Promise<void>;
@@ -691,6 +692,29 @@ export class CollaborationTimeline {
           text: `After ${task.dependsOn.join(', ')}`,
         });
       }
+      const contract = item.createEl('details', {
+        cls: 'claudian-collaboration-work-task-contract',
+      });
+      contract.createEl('summary', {
+        text: `${task.risk} risk · ${task.acceptanceCriteria.length} criteria · ${
+          task.verificationCommands.length
+        } checks`,
+      });
+      if (task.description) contract.createDiv({ text: task.description });
+      const criteria = contract.createEl('ul');
+      for (const criterion of task.acceptanceCriteria) {
+        criteria.createEl('li', { text: criterion });
+      }
+      const commands = contract.createDiv({
+        cls: 'claudian-collaboration-work-task-commands',
+      });
+      for (const command of task.verificationCommands) {
+        commands.createEl('code', { text: command });
+      }
+      contract.createDiv({
+        cls: 'claudian-collaboration-work-task-retries',
+        text: `${task.attempts}/${task.maxAttempts} attempts used`,
+      });
       if (
         queue.status === 'approved'
         && (task.status === 'ready' || task.status === 'failed')
@@ -709,6 +733,33 @@ export class CollaborationTimeline {
           void operation.catch(() => {
             action.disabled = false;
             action.setText(task.status === 'ready' ? 'Run task' : 'Prepare retry');
+          });
+        });
+      }
+      const activeParticipantId = task.status === 'running'
+        ? task.ownerId
+        : task.status === 'review'
+          ? task.reviewerId
+          : undefined;
+      if (
+        queue.status === 'approved'
+        && activeParticipantId
+        && !this.options.canStop(activeParticipantId)
+      ) {
+        const recover = item.createEl('button', {
+          cls: 'claudian-collaboration-work-task-action',
+          text: 'Recover interrupted task',
+          attr: {
+            type: 'button',
+            title: 'Mark this inactive task failed so it can be retried within its retry budget.',
+          },
+        });
+        recover.addEventListener('click', () => {
+          recover.disabled = true;
+          recover.setText('Recovering…');
+          void this.options.onRecoverWorkTask(task.id).catch(() => {
+            recover.disabled = false;
+            recover.setText('Recover interrupted task');
           });
         });
       }
