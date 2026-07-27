@@ -11,6 +11,7 @@ import type {
 
 const ROOMS_PATH = '.claudian/rooms';
 const SAFE_ROOM_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const MAX_WORK_QUEUE_HISTORY = 20;
 
 export interface CreateCollaborationRoomOptions {
   id: string;
@@ -245,6 +246,7 @@ export class CollaborationRoomRepository {
         }
         room.workQueueHistory ??= [];
         room.workQueueHistory.push(structuredClone(room.workQueue));
+        room.workQueueHistory = room.workQueueHistory.slice(-MAX_WORK_QUEUE_HISTORY);
       }
       if (
         expectedQueueUpdatedAt !== undefined

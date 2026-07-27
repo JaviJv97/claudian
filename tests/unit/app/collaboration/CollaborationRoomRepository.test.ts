@@ -144,6 +144,24 @@ describe('CollaborationRoomRepository', () => {
     })).rejects.toThrow('finish the current work queue');
   });
 
+  it('bounds archived queue history growth', async () => {
+    const repository = new CollaborationRoomRepository(createAdapter());
+    await repository.create({ id: 'room-1', title: 'Room', participants: [], now: 100 });
+    for (let index = 0; index < 25; index += 1) {
+      await repository.updateWorkQueue('room-1', {
+        ...createQueue(110 + index),
+        sourceDeliberationId: `delib-${index}`,
+        status: 'completed',
+        completionApprovedAt: 110 + index,
+      });
+    }
+
+    const room = await repository.get('room-1');
+    expect(room?.workQueueHistory).toHaveLength(20);
+    expect(room?.workQueueHistory?.[0].sourceDeliberationId).toBe('delib-4');
+    expect(room?.workQueue?.sourceDeliberationId).toBe('delib-24');
+  });
+
   it('updates one participant delivery without replacing the others', async () => {
     const repository = new CollaborationRoomRepository(createAdapter());
     await repository.create({
