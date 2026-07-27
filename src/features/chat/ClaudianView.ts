@@ -1792,6 +1792,15 @@ export class ClaudianView extends ItemView {
     if (!synthesisEvent || !originalEvent) {
       throw new Error('Approved plan context is incomplete');
     }
+    const activeParticipantIds = getRoutableCollaborationParticipantIds(
+      room,
+      originalEvent.content,
+      true,
+    );
+    if (activeParticipantIds.length < 2) {
+      new Notice('Autonomous workflows require at least two active agents for cross-review.');
+      throw new Error('Not enough active agents for autonomous cross-review');
+    }
     const workflowId = `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     new Notice('Approved plan started. The room will stop at a human review checkpoint.');
     await this.routeCollaborationMessage(
