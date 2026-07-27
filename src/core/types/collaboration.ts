@@ -10,7 +10,16 @@ export type CollaborationDeliveryStatus =
   | 'resolved'
   | 'failed'
   | 'cancelled';
-export type CollaborationDiscussionMode = 'parallel' | 'round-table' | 'mentioned-only';
+export type CollaborationDiscussionMode =
+  | 'parallel'
+  | 'round-table'
+  | 'deliberation'
+  | 'mentioned-only';
+export type CollaborationDeliberationPhase =
+  | 'position'
+  | 'critique'
+  | 'synthesis'
+  | 'ratification';
 
 export interface CollaborationMembership {
   roomId: string;
@@ -60,6 +69,8 @@ export interface CollaborationEvent {
   delivery: Record<string, CollaborationDelivery>;
   attachments?: CollaborationAttachment[];
   sourceMessageId?: string;
+  deliberationId?: string;
+  deliberationPhase?: CollaborationDeliberationPhase;
 }
 
 export interface CollaborationRoom {

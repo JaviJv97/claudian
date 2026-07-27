@@ -122,6 +122,34 @@ describe('CollaborationCoordinator', () => {
     ]);
   });
 
+  it('keeps later sequential recipients pending until their turn begins', async () => {
+    const room = createRoom();
+    const storage = createStorage(room);
+    let releaseFirst!: () => void;
+    const coordinator = new CollaborationCoordinator({
+      storage,
+      generateId: () => 'event-1',
+      now: () => 10,
+    });
+    const turn = await coordinator.send(room, {
+      content: 'Discuss',
+      recipientIds: ['claude', 'codex'],
+      strategy: 'sequential',
+      dispatch: participant => participant.providerId === 'claude'
+        ? new Promise(resolve => { releaseFirst = () => resolve({}); })
+        : Promise.resolve({}),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(room.events[0].delivery.claude.status).toBe('streaming');
+    expect(room.events[0].delivery.codex.status).toBe('pending');
+
+    releaseFirst();
+    await turn.completion;
+    expect(room.events[0].delivery.codex.status).toBe('completed');
+  });
+
   it('keeps deliveries separate for two participants from the same provider', async () => {
     const room = createRoom();
     room.participants = [

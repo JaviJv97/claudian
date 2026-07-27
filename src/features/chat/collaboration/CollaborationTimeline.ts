@@ -154,6 +154,11 @@ export class CollaborationTimeline {
         title: 'Agents respond together and see one another’s responses next turn.',
       },
       {
+        id: 'deliberation',
+        label: 'Deliberation',
+        title: 'Independent positions, cross-critique, synthesis, and explicit ratification.',
+      },
+      {
         id: 'mentioned-only',
         label: 'Mentions',
         title: 'Only agents you explicitly select or mention respond.',
@@ -302,7 +307,14 @@ export class CollaborationTimeline {
       });
       messageEl.createDiv({
         cls: 'claudian-collaboration-author',
-        text: event.authorId === 'user' ? 'You' : this.getParticipantLabel(event.authorId),
+        text: event.authorId === 'user'
+          ? 'You'
+          : event.authorId === 'system' && event.deliberationPhase
+            ? `Deliberation · ${event.deliberationPhase}`
+            : [
+              this.getParticipantLabel(event.authorId),
+              event.deliberationPhase,
+            ].filter(Boolean).join(' · '),
       });
       const contentEl = messageEl.createDiv({
         cls: 'claudian-collaboration-content',

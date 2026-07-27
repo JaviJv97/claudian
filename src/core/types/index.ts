@@ -15,6 +15,7 @@ export {
 export {
   type CollaborationAttachment,
   type CollaborationAuthorId,
+  type CollaborationDeliberationPhase,
   type CollaborationDelivery,
   type CollaborationDeliveryStatus,
   type CollaborationDiscussionMode,

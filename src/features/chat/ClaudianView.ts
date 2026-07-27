@@ -1,7 +1,12 @@
 import type { EventRef, WorkspaceLeaf } from 'obsidian';
 import { ItemView, Notice, Scope, setIcon } from 'obsidian';
 
+import type { CollaborationDispatch } from '../../core/collaboration/CollaborationCoordinator';
 import { CollaborationCoordinator } from '../../core/collaboration/CollaborationCoordinator';
+import {
+  buildDeliberationInstruction,
+  evaluateDeliberationConsensus,
+} from '../../core/collaboration/collaborationDeliberation';
 import {
   createCollaborationMemberships,
   createCollaborationRoomId,
@@ -18,7 +23,11 @@ import {
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
-import type { CollaborationEvent, ImageAttachment } from '../../core/types';
+import type {
+  CollaborationDeliberationPhase,
+  CollaborationEvent,
+  ImageAttachment,
+} from '../../core/types';
 import { VIEW_TYPE_CLAUDIAN } from '../../core/types';
 import {
   cancelScheduledAnimationFrame,
@@ -850,19 +859,9 @@ export class ClaudianView extends ItemView {
       }))),
     );
     const fileBaseline = await captureSharedFileSnapshot();
-    const turn = await this.collaborationCoordinator.send(room, {
-      content: collaborationTurn.content,
-      recipientIds: collaborationTurn.recipientIds,
-      recipientContent: collaborationTurn.recipientContent,
-      attachments: images,
-      strategy: discussionMode === 'round-table' ? 'sequential' : 'parallel',
-      prepareContent: (participant, event) => buildCollaborationPrompt(
-        room,
-        getCollaborationParticipantId(participant),
-        event.recipientContent?.[getCollaborationParticipantId(participant)] ?? event.content,
-        { currentEventId: event.id },
-      ),
-      dispatch: async (participant, request, signal) => {
+    let activeDeliberationId: string | undefined;
+    let activeDeliberationPhase: CollaborationDeliberationPhase | undefined;
+    const dispatch: CollaborationDispatch = async (participant, request, signal) => {
         const participantId = getCollaborationParticipantId(participant);
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -918,16 +917,22 @@ export class ClaudianView extends ItemView {
             createdAt: assistantMessage.timestamp,
             delivery: {},
             sourceMessageId: assistantMessage.id,
+            deliberationId: activeDeliberationId,
+            deliberationPhase: activeDeliberationPhase,
           };
           await this.plugin.storage.rooms.appendEvent(room.id, assistantEvent);
           room.events.push(structuredClone(assistantEvent));
           await this.plugin.storage.rooms.updateParticipantCursor(
             room.id,
             participantId,
-            discussionMode === 'round-table' ? assistantEvent.id : request.eventId,
+            discussionMode === 'round-table' || discussionMode === 'deliberation'
+              ? assistantEvent.id
+              : request.eventId,
           );
           room.participantLastSeenEventIds ??= {};
-          room.participantLastSeenEventIds[participantId] = discussionMode === 'round-table'
+          room.participantLastSeenEventIds[participantId] = (
+            discussionMode === 'round-table' || discussionMode === 'deliberation'
+          )
             ? assistantEvent.id
             : request.eventId;
           this.refreshCollaborationTimelines(room.id);
@@ -947,7 +952,97 @@ export class ClaudianView extends ItemView {
           providerMessageId: assistantMessage?.assistantMessageId,
           conflictFiles: conflictFiles.length > 0 ? conflictFiles : undefined,
         };
-      },
+    };
+
+    if (discussionMode === 'deliberation') {
+      const deliberationId = `deliberation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const allParticipantIds = room.participants.map(getCollaborationParticipantId);
+      const synthesizerId = allParticipantIds.at(-1);
+      const runPhase = async (
+        phase: CollaborationDeliberationPhase,
+        recipientIds: string[],
+        strategy: 'parallel' | 'sequential',
+      ): Promise<void> => {
+        activeDeliberationId = deliberationId;
+        activeDeliberationPhase = phase;
+        const phaseTurn = await this.collaborationCoordinator.send(room, {
+          content: phase === 'position'
+            ? collaborationTurn.content
+            : `${phase[0].toUpperCase()}${phase.slice(1)} phase`,
+          recipientIds,
+          attachments: phase === 'position' ? images : undefined,
+          strategy,
+          eventAuthorId: phase === 'position' ? 'user' : 'system',
+          eventKind: phase === 'position' ? 'message' : 'system',
+          eventMetadata: { deliberationId, deliberationPhase: phase },
+          prepareContent: () => buildDeliberationInstruction(
+            room,
+            phase,
+            collaborationTurn.content,
+            deliberationId,
+          ),
+          dispatch,
+        });
+        room.events.push(structuredClone(phaseTurn.event));
+        for (const participantId of recipientIds) {
+          this.activeCollaborationDeliveries.set(
+            this.getCollaborationDeliveryKey(room.id, participantId),
+            phaseTurn.event.id,
+          );
+        }
+        this.refreshCollaborationTimelines(room.id);
+        await phaseTurn.completion;
+        for (const participantId of recipientIds) {
+          this.activeCollaborationDeliveries.delete(
+            this.getCollaborationDeliveryKey(room.id, participantId),
+          );
+        }
+        this.refreshCollaborationTimelines(room.id);
+      };
+
+      await runPhase('position', allParticipantIds, 'parallel');
+      await runPhase('critique', allParticipantIds, 'parallel');
+      if (synthesizerId) await runPhase('synthesis', [synthesizerId], 'sequential');
+      await runPhase('ratification', allParticipantIds, 'parallel');
+      const consensus = evaluateDeliberationConsensus(
+        room.events,
+        deliberationId,
+        allParticipantIds,
+      );
+      const finalEvent: CollaborationEvent = {
+        id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        kind: 'system',
+        authorId: 'system',
+        recipientIds: ['user'],
+        content: consensus.approved
+          ? 'Consensus verified: every participant explicitly approved the synthesis.'
+          : `No consensus. Objections preserved from: ${
+            consensus.objections.length > 0 ? consensus.objections.join(', ') : 'missing ratifications'
+          }.`,
+        createdAt: Date.now(),
+        delivery: {},
+        deliberationId,
+        deliberationPhase: 'ratification',
+      };
+      await this.plugin.storage.rooms.appendEvent(room.id, finalEvent);
+      room.events.push(finalEvent);
+      this.refreshCollaborationTimelines(room.id);
+      return true;
+    }
+
+    const turn = await this.collaborationCoordinator.send(room, {
+      content: collaborationTurn.content,
+      recipientIds: collaborationTurn.recipientIds,
+      recipientContent: collaborationTurn.recipientContent,
+      attachments: images,
+      strategy: discussionMode === 'round-table' ? 'sequential' : 'parallel',
+      prepareContent: (participant, event) => buildCollaborationPrompt(
+        room,
+        getCollaborationParticipantId(participant),
+        event.recipientContent?.[getCollaborationParticipantId(participant)] ?? event.content,
+        { currentEventId: event.id },
+      ),
+      dispatch,
     });
     for (const participantId of collaborationTurn.recipientIds) {
       this.activeCollaborationDeliveries.set(
@@ -1077,7 +1172,9 @@ export class ClaudianView extends ItemView {
                 ? 'Round table: agents respond sequentially with shared context.'
                 : mode === 'parallel'
                   ? 'Parallel: agents respond together and share context next turn.'
-                  : 'Mentions: only selected agents respond.',
+                  : mode === 'deliberation'
+                    ? 'Deliberation: independent positions through explicit ratification.'
+                    : 'Mentions: only selected agents respond.',
             );
           },
           canStop: providerId => this.activeCollaborationDeliveries.has(

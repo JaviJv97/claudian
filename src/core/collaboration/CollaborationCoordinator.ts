@@ -35,6 +35,9 @@ export interface SendCollaborationTurnOptions {
     participant: CollaborationParticipant,
     event: CollaborationEvent,
   ) => Promise<string> | string;
+  eventMetadata?: Pick<CollaborationEvent, 'deliberationId' | 'deliberationPhase'>;
+  eventAuthorId?: CollaborationEvent['authorId'];
+  eventKind?: CollaborationEvent['kind'];
   dispatch: CollaborationDispatch;
 }
 
@@ -91,8 +94,8 @@ export class CollaborationCoordinator {
     ));
     const event: CollaborationEvent = {
       id: this.generateId(),
-      kind: 'message',
-      authorId: 'user',
+      kind: options.eventKind ?? 'message',
+      authorId: options.eventAuthorId ?? 'user',
       recipientIds: recipients.map(getCollaborationParticipantId),
       content: options.content,
       recipientContent: options.recipientContent
@@ -106,20 +109,26 @@ export class CollaborationCoordinator {
         ]),
       ),
       attachments: options.attachments?.map(attachment => ({ ...attachment })),
+      ...options.eventMetadata,
     };
     await this.storage.appendEvent(room.id, structuredClone(event));
 
-    const deliveries = await Promise.all(recipients.map(async (participant) => {
+    const deliveries = recipients.map((participant) => {
       const participantId = getCollaborationParticipantId(participant);
       const key = this.getDeliveryKey(room.id, event.id, participantId);
       const abortController = new AbortController();
       this.abortControllers.set(key, abortController);
-      await this.setDelivery(room.id, event, participantId, {
-        status: 'streaming',
-        startedAt: this.now(),
-      });
       return { abortController, key, participant, participantId };
-    }));
+    });
+    const isSequential = options.strategy === 'sequential';
+    if (!isSequential) {
+      await Promise.all(deliveries.map(delivery => this.setDelivery(
+        room.id,
+        event,
+        delivery.participantId,
+        { status: 'streaming', startedAt: this.now() },
+      )));
+    }
     const dispatchDelivery = (delivery: typeof deliveries[number]) => this.dispatch(
         room,
         event,
@@ -129,8 +138,9 @@ export class CollaborationCoordinator {
         options.prepareContent,
         delivery.abortController,
         delivery.key,
+        isSequential,
       );
-    const completion = options.strategy === 'sequential'
+    const completion = isSequential
       ? deliveries.reduce<Promise<void>>(
         (previous, delivery) => previous.then(() => dispatchDelivery(delivery)),
         Promise.resolve(),
@@ -157,10 +167,17 @@ export class CollaborationCoordinator {
     prepareContent: SendCollaborationTurnOptions['prepareContent'],
     abortController: AbortController,
     key: string,
+    markStreaming: boolean,
   ): Promise<void> {
     try {
       if (abortController.signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
+      }
+      if (markStreaming) {
+        await this.setDelivery(room.id, event, participantId, {
+          status: 'streaming',
+          startedAt: this.now(),
+        });
       }
       const content = prepareContent
         ? await prepareContent(participant, event)
