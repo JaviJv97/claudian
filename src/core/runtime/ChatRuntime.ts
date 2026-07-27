@@ -15,6 +15,7 @@ import type {
   ChatTurnRequest,
   ExitPlanModeCallback,
   PreparedChatTurn,
+  ProviderQuotaSnapshot,
   SessionUpdateResult,
 } from './types';
 
@@ -53,6 +54,8 @@ export interface ChatRuntime {
     listener: (commands: readonly SlashCommand[]) => void,
   ): () => void;
   getAuxiliaryModel?(): string | null;
+  /** Reads provider account quota without submitting a model turn. */
+  getQuotaSnapshot?(): Promise<ProviderQuotaSnapshot>;
   cleanup(): void;
   previewRewind?(
     userMessageId: string,

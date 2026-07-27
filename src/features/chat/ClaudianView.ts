@@ -72,7 +72,9 @@ import { MentionCacheCoordinator } from './services/MentionCacheCoordinator';
 import { TabStatePersistenceCoordinator } from './services/TabStatePersistenceCoordinator';
 import {
   getTabProviderId,
+  initializeTabService,
   sendTabInputMessageFromExplicitEnterShortcut,
+  setupServiceCallbacks,
   updatePlanModeUI,
 } from './tabs/Tab';
 import { TabBar } from './tabs/TabBar';
@@ -1691,6 +1693,52 @@ export class ClaudianView extends ItemView {
                         : 'Could not update usage policy.',
                     );
                   });
+              },
+              async () => {
+                const participantTab = roomTabs.find(candidate => (
+                  candidate.conversationId === participant.conversationId
+                ));
+                if (!participantTab) {
+                  new Notice(`${participant.label ?? participantId} tab is unavailable.`);
+                  throw new Error('Participant tab is unavailable.');
+                }
+                if (!participantTab.service || !participantTab.serviceInitialized) {
+                  await initializeTabService(participantTab, this.plugin);
+                  setupServiceCallbacks(participantTab, this.plugin);
+                }
+                const runtime = participantTab.service;
+                if (!runtime?.getQuotaSnapshot) {
+                  new Notice(`${participant.label ?? participantId} does not expose account quota.`);
+                  throw new Error('Provider quota is unavailable.');
+                }
+                try {
+                  await runtime.ensureReady();
+                  const quotaSnapshot = await runtime.getQuotaSnapshot();
+                  const weeklyWindow = quotaSnapshot.windows.find(window => (
+                    window.id === 'seven-day' || window.id === 'secondary'
+                  ));
+                  await this.plugin.storage.rooms.updateParticipantResourcePolicy(
+                    roomId,
+                    participantId,
+                    {
+                      mode: participant.resourcePolicy?.mode ?? 'active',
+                      weeklyUsagePercent: weeklyWindow?.utilizationPercent
+                        ?? participant.resourcePolicy?.weeklyUsagePercent,
+                      quotaSnapshot,
+                    },
+                  );
+                  await this.reconcileCollaborationTimelines();
+                  new Notice(
+                    quotaSnapshot.windows.length > 0
+                      ? `${participant.label ?? participantId} quota refreshed.`
+                      : quotaSnapshot.unavailableReason ?? 'Provider quota is unavailable.',
+                  );
+                } catch (error) {
+                  new Notice(
+                    error instanceof Error ? error.message : 'Could not refresh provider quota.',
+                  );
+                  throw error;
+                }
               },
             ).open();
           },

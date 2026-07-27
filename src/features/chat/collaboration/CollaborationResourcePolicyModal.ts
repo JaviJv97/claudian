@@ -10,8 +10,9 @@ export class CollaborationResourcePolicyModal extends Modal {
   constructor(
     plugin: FeatureHost,
     private readonly participantLabel: string,
-    current: CollaborationParticipantResourcePolicy | undefined,
+    private readonly current: CollaborationParticipantResourcePolicy | undefined,
     private readonly onSave: (policy: CollaborationParticipantResourcePolicy) => void,
+    private readonly onRefresh?: () => Promise<void>,
   ) {
     super(plugin.app);
     this.mode = current?.mode ?? 'active';
@@ -22,8 +23,16 @@ export class CollaborationResourcePolicyModal extends Modal {
     this.contentEl.empty();
     this.setTitle(`${this.participantLabel} usage`);
     this.contentEl.createEl('p', {
-      text: 'Weekly quota is user-reported because provider account limits are not exposed reliably.',
+      text: 'Refresh reads account limits from the local provider runtime without sending a model prompt. Manual weekly usage remains available as a fallback.',
     });
+    if (this.current?.quotaSnapshot) {
+      const snapshot = this.current.quotaSnapshot;
+      this.contentEl.createEl('p', {
+        text: snapshot.windows.length > 0
+          ? snapshot.windows.map(window => `${window.label}: ${window.utilizationPercent}%`).join(' · ')
+          : snapshot.unavailableReason ?? 'Provider quota unavailable',
+      });
+    }
     new Setting(this.contentEl)
       .setName('Routing mode')
       .setDesc('Preserve skips group and autonomous turns but still allows an explicit @mention.')
@@ -34,6 +43,22 @@ export class CollaborationResourcePolicyModal extends Modal {
         .setValue(this.mode)
         .onChange((value) => {
           this.mode = value as CollaborationParticipantResourcePolicy['mode'];
+        }));
+    new Setting(this.contentEl)
+      .setName('Provider quota')
+      .setDesc('Fetch the latest provider-reported limits for this account.')
+      .addButton(button => button
+        .setButtonText('Refresh from provider')
+        .onClick(() => {
+          if (!this.onRefresh) return;
+          button.setDisabled(true);
+          button.setButtonText('Refreshing…');
+          void this.onRefresh()
+            .then(() => this.close())
+            .catch(() => {
+              button.setDisabled(false);
+              button.setButtonText('Refresh from provider');
+            });
         }));
     new Setting(this.contentEl)
       .setName('Weekly usage')
@@ -61,6 +86,7 @@ export class CollaborationResourcePolicyModal extends Modal {
           this.onSave({
             mode: this.mode,
             weeklyUsagePercent: this.weeklyUsagePercent,
+            quotaSnapshot: this.current?.quotaSnapshot,
           });
           this.close();
         }));

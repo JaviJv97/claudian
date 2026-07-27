@@ -1,3 +1,4 @@
+import type { ProviderQuotaSnapshot } from '../runtime/types';
 import type { ProviderId } from './provider';
 
 export type CollaborationAuthorId = 'user' | 'system' | ProviderId;
@@ -64,8 +65,10 @@ export interface CollaborationParticipant {
 
 export interface CollaborationParticipantResourcePolicy {
   mode: 'active' | 'preserve' | 'unavailable';
-  /** User-reported provider quota utilization; providers do not expose this reliably. */
+  /** Manual fallback used when a provider snapshot is unavailable. */
   weeklyUsagePercent?: number;
+  /** Last provider-reported account snapshot. Safe to persist; contains no credentials. */
+  quotaSnapshot?: ProviderQuotaSnapshot;
 }
 
 export interface CollaborationDelivery {

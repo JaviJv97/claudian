@@ -835,9 +835,16 @@ export class CollaborationTimeline {
         resourceEl.setAttribute(
           'title',
           [
-            policy?.weeklyUsagePercent !== undefined
-              ? `${policy.weeklyUsagePercent}% user-reported weekly usage`
+            policy?.quotaSnapshot?.windows.length
+              ? policy.quotaSnapshot.windows
+                .map(window => `${window.label}: ${window.utilizationPercent}%`)
+                .join(' · ')
+              : policy?.weeklyUsagePercent !== undefined
+                ? `${policy.weeklyUsagePercent}% manually reported weekly usage`
               : 'Weekly usage not set',
+            policy?.quotaSnapshot
+              ? `Provider snapshot ${new Date(policy.quotaSnapshot.fetchedAt).toLocaleString()}`
+              : 'No provider snapshot',
             contextUsage
               ? `${contextUsage.contextTokens.toLocaleString()} context tokens`
               : persistedUsage
@@ -853,8 +860,17 @@ export class CollaborationTimeline {
     policy: CollaborationParticipantResourcePolicy | undefined,
     contextPercent?: number,
   ): string {
-    const usage = policy?.weeklyUsagePercent !== undefined
-      ? `${policy.weeklyUsagePercent}% week`
+    const fiveHour = policy?.quotaSnapshot?.windows.find(window => window.id === 'five-hour'
+      || window.id === 'primary');
+    const weekly = policy?.quotaSnapshot?.windows.find(window => window.id === 'seven-day'
+      || window.id === 'secondary');
+    const usage = fiveHour || weekly
+      ? [
+        fiveHour ? `${fiveHour.utilizationPercent}% 5h` : '',
+        weekly ? `${weekly.utilizationPercent}% week` : '',
+      ].filter(Boolean).join(' · ')
+      : policy?.weeklyUsagePercent !== undefined
+        ? `${policy.weeklyUsagePercent}% week`
       : contextPercent !== undefined
         ? `${contextPercent}% context`
         : 'Usage';

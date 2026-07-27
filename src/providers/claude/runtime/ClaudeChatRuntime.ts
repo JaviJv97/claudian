@@ -45,6 +45,7 @@ import type {
   ChatTurnMetadata,
   ChatTurnRequest,
   PreparedChatTurn,
+  ProviderQuotaSnapshot,
   SessionUpdateResult,
 } from '../../../core/runtime/types';
 import { TOOL_ENTER_PLAN_MODE, TOOL_SKILL } from '../../../core/tools/toolNames';
@@ -100,6 +101,7 @@ import {
   QueryOptionsBuilder,
   type QueryOptionsContext,
 } from './ClaudeQueryOptionsBuilder';
+import { mapClaudeUsageToQuotaSnapshot } from './ClaudeQuotaSnapshot';
 import { executeClaudeRewind } from './ClaudeRewindService';
 import { SessionManager } from './ClaudeSessionManager';
 import {
@@ -253,6 +255,15 @@ export class ClaudianService implements ChatRuntime {
 
   getCapabilities() {
     return CLAUDE_PROVIDER_CAPABILITIES;
+  }
+
+  async getQuotaSnapshot(): Promise<ProviderQuotaSnapshot> {
+    if (!this.persistentQuery || this.shuttingDown) {
+      throw new Error('Claude runtime must be ready before refreshing quota.');
+    }
+    const usage = await this.persistentQuery
+      .usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+    return mapClaudeUsageToQuotaSnapshot(usage);
   }
 
   async prepareForTurn(): Promise<void> {
