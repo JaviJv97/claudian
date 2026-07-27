@@ -92,8 +92,21 @@ export function parseCollaborationTaskGraph(
   if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0) {
     throw new Error('The synthesis task graph has no tasks');
   }
+  const assignedIds = new Set<string>();
+  const canonicalIds = parsed.tasks.map((input, index) => {
+    const requested = String(input.id ?? '').trim();
+    const fallback = `TASK-${String(index + 1).padStart(3, '0')}`;
+    let candidate = requested && !assignedIds.has(requested) ? requested : fallback;
+    let suffix = index + 1;
+    while (assignedIds.has(candidate)) {
+      suffix += 1;
+      candidate = `TASK-${String(suffix).padStart(3, '0')}`;
+    }
+    assignedIds.add(candidate);
+    return candidate;
+  });
   const tasks = parsed.tasks.map((input, index): CollaborationWorkTask => ({
-    id: String(input.id ?? `TASK-${String(index + 1).padStart(3, '0')}`),
+    id: canonicalIds[index],
     title: String(input.title ?? '').trim(),
     description: String(input.description ?? '').trim(),
     status: 'draft',
@@ -135,6 +148,7 @@ export function validateCollaborationWorkQueue(
     if (!task.id || ids.has(task.id)) errors.push(`Task id ${task.id || '(empty)'} must be unique`);
     ids.add(task.id);
     if (!task.title) errors.push(`${task.id} needs a title`);
+    if (!task.description) errors.push(`${task.id} needs a bounded description`);
     if (!participantIds.includes(task.ownerId)) errors.push(`${task.id} has an unknown owner`);
     if (!participantIds.includes(task.reviewerId)) errors.push(`${task.id} has an unknown reviewer`);
     if (task.ownerId === task.reviewerId) errors.push(`${task.id} owner and reviewer must differ`);

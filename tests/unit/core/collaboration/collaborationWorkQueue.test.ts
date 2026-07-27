@@ -92,6 +92,38 @@ describe('collaboration work queue', () => {
     expect(parsed.createdAt).toBe(25);
   });
 
+  it('normalizes missing and duplicate generated task IDs', () => {
+    const task = {
+      title: 'Build it',
+      description: 'Implement.',
+      ownerId: 'codex',
+      reviewerId: 'company',
+      dependsOn: [],
+      fileScopes: ['src/**'],
+      acceptanceCriteria: ['Passes'],
+      verificationCommands: ['npm test'],
+      risk: 'low',
+    };
+    const parsed = parseCollaborationTaskGraph([
+      '```task-graph',
+      JSON.stringify({
+        tasks: [
+          { ...task, id: 'TASK-001' },
+          { ...task, id: 'TASK-001', title: 'Review it', dependsOn: ['TASK-001'] },
+          { ...task, id: '', title: 'Document it' },
+        ],
+      }),
+      '```',
+    ].join('\n'), 'delib-1', 25);
+
+    expect(parsed.tasks.map(candidate => candidate.id)).toEqual([
+      'TASK-001',
+      'TASK-002',
+      'TASK-003',
+    ]);
+    expect(new Set(parsed.tasks.map(candidate => candidate.id))).toHaveProperty('size', 3);
+  });
+
   it('approves a valid graph and derives ready versus blocked states', () => {
     const approved = approveCollaborationWorkQueue(queue(), participants, 20);
 

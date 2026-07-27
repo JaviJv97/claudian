@@ -86,6 +86,23 @@
   border-left-color: var(--color-orange);
 }
 
+.claudian-collaboration-work-task[data-status="running"] {
+  border-left-color: var(--color-blue);
+}
+
+.claudian-collaboration-work-task[data-status="review"] {
+  border-left-color: var(--color-purple);
+}
+
+.claudian-collaboration-work-task[data-status="failed"] {
+  border-left-color: var(--color-red);
+}
+
+.claudian-collaboration-work-task[data-status="done"] {
+  border-left-color: var(--color-green);
+  opacity: 0.82;
+}
+
 .claudian-collaboration-work-task-title {
   margin-top: 2px;
   color: var(--text-normal);

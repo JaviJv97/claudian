@@ -685,11 +685,22 @@ export class CollaborationTimeline {
         .flatMap(evidence => evidence?.resourceUsage ?? [])
         .reduce((taskTotal, usage) => taskTotal + usage.contextTokenDelta, 0)
     ), 0);
+    const statusSummary = ([
+      'draft',
+      'ready',
+      'running',
+      'review',
+      'blocked',
+      'failed',
+      'done',
+      'cancelled',
+    ] as const).flatMap((status) => {
+      const count = queue.tasks.filter(task => task.status === status).length;
+      return count > 0 ? [`${count} ${status}`] : [];
+    }).join(' · ');
     panel.createDiv({
       cls: 'claudian-collaboration-work-queue-summary',
-      text: `${queue.tasks.filter(task => task.status === 'ready').length} ready · ${
-        queue.tasks.filter(task => task.status === 'blocked').length
-      } blocked · ${queue.tasks.filter(task => task.status === 'done').length} done${
+      text: `${statusSummary || 'No tasks'}${
         room.workQueueHistory?.length
           ? ` · ${room.workQueueHistory.length} archived`
           : ''
